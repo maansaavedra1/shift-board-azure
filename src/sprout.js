@@ -1035,4 +1035,42 @@ async function computeReportsForCustomRange(fromDateStr, toDateStr) {
   return computeReportsBetweenDates(rangeStart, rangeEnd);
 }
 
-module.exports = { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS };
+// One-time diagnostic: finds an employee's raw record by name — for
+// looking up a System ID quickly when investigating someone's
+// classification.
+async function findEmployeeByName(nameQuery) {
+  const employees = await getEmployees();
+  const query = nameQuery.toLowerCase();
+  return employees.filter((emp) => {
+    const basic = emp.basicInformation || {};
+    const fullName = `${basic.firstName || ''} ${basic.lastName || ''}`.toLowerCase();
+    return fullName.includes(query);
+  });
+}
+
+// One-time diagnostic: fetches one employee's raw Schedules data live,
+// bypassing the cache entirely, so it can be compared directly against
+// what is (or isn't) actually cached for them right now.
+async function getRawScheduleForEmployee(employeeId, windowDaysPast, windowDaysFuture) {
+  const now = new Date();
+  const rangeStart = new Date(now.getTime() - windowDaysPast * 24 * 60 * 60 * 1000);
+  const rangeEnd = new Date(now.getTime() + windowDaysFuture * 24 * 60 * 60 * 1000);
+  const dateFromISO = `${formatDateKey(rangeStart)}T00:00:00`;
+  const dateToISO = `${formatDateKey(rangeEnd)}T23:59:59`;
+
+  const url = buildApiUrl('timeattendance', `/api/v1/Schedules?DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}&EmployeeId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100`);
+  const response = await fetchWithRetry(url, { headers: await sproutHeaders() });
+  const status = response.status;
+  const body = await response.text();
+  let parsed = null;
+  try { parsed = JSON.parse(body); } catch (e) { /* leave as raw text below if not valid JSON */ }
+
+  return {
+    requestedUrl: url,
+    httpStatus: status,
+    cachedLeaveRightNow: getCachedLeave(employeeId, formatDateKey(now)),
+    rawResponse: parsed || body
+  };
+}
+
+module.exports = { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, findEmployeeByName, getRawScheduleForEmployee };
