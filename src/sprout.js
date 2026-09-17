@@ -605,7 +605,14 @@ function classifyEmployeeForDay(emp, dayContext) {
   const leaveEntries = getCachedLeave(systemId, dayContext.dayKey);
   if (leaveEntries && leaveEntries.length > 0) {
     const types = [...new Set(leaveEntries.map((l) => l.type).filter(Boolean))].join(', ');
-    const anyHalfDay = leaveEntries.some((l) => l.isWhole === false);
+    const halfDayEntry = leaveEntries.find((l) => l.isWhole === false);
+    // Sprout's own leave application data already distinguishes which
+    // half of the day was filed — isFirstHalf true means the morning
+    // (so the person is expected in that afternoon), false means the
+    // afternoon (expected in that morning). Read directly from the
+    // application, not inferred, so this only shows when Sprout's own
+    // record actually says which half.
+    const halfDayPeriod = halfDayEntry ? (halfDayEntry.isFirstHalf ? 'AM' : 'PM') : null;
     // Reconstructed from the per-day cache — the primary leave type found
     // for this specific day is what's used to find the surrounding range,
     // since a mixed multi-type day (rare) can't cleanly extend in both
@@ -617,7 +624,8 @@ function classifyEmployeeForDay(emp, dayContext) {
       entry: {
         name, ...contactInfo, loginTime, logoutTime,
         leaveType: types || 'Leave',
-        leaveIsHalfDay: anyHalfDay,
+        leaveIsHalfDay: !!halfDayEntry,
+        leaveHalfDayPeriod: halfDayPeriod,
         leaveFrom: range ? range.startKey : dayContext.dayKey,
         leaveTo: range ? range.endKey : dayContext.dayKey,
         // Honest truncation markers — a leave longer than the walk cap

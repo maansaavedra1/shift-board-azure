@@ -512,6 +512,19 @@ that the safety should be obvious without needing to trace into another
 file. Re-confirmed the exact same end-to-end request still returns 62
 days.
 
+### Half-day leave now shows AM or PM
+
+Previously removed from the display entirely (per an earlier decision to
+focus on the date range instead), then requested back specifically with
+an AM/PM distinction. Sprout's leave application data already carries
+this directly — `isFirstHalf: true` means the morning was filed (so the
+person is expected in that afternoon), `false` means the afternoon (so
+expected that morning). Read straight from the application rather than
+inferred from anything else. Shows as "On leave (Sep 10, 2026, half day
+(AM))" — appended only when the leave genuinely is a half day; a normal
+whole-day leave is unaffected. Confirmed with real AM, PM, and whole-day
+cases, backend and in a real rendered browser.
+
 ### Registration still fetched employees for an attempt that could never succeed
 
 The allowlist check (see the security audit fixes above) closed most of

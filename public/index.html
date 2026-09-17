@@ -1117,6 +1117,9 @@
         var toDisp = formatDateKeyForDisplay(e.leaveTo) + (e.leaveToIsApproximate ? ' or later' : '');
         leaveDateText = (e.leaveFrom === e.leaveTo && !e.leaveFromIsApproximate && !e.leaveToIsApproximate) ? fromDisp : (fromDisp + ' – ' + toDisp);
       }
+      // Half-day, read straight from the leave application itself (not
+      // inferred) — Sprout's own isFirstHalf tells us AM vs PM directly.
+      if (e.leaveIsHalfDay && e.leaveHalfDayPeriod) leaveDateText += ', half day (' + e.leaveHalfDayPeriod + ')';
       var leaveLabel = leaveDateText ? ('On leave (' + leaveDateText + ')') : 'On approved leave';
       var range = escapeHtml(leaveLabel);
       // Logs during approved leave are worth flagging visually — someone
@@ -1155,6 +1158,7 @@
         var toDisp2 = formatDateKeyForDisplay(e.leaveTo) + (e.leaveToIsApproximate ? ' or later' : '');
         leaveDateText2 = (e.leaveFrom === e.leaveTo && !e.leaveFromIsApproximate && !e.leaveToIsApproximate) ? fromDisp2 : (fromDisp2 + ' – ' + toDisp2);
       }
+      if (e.leaveIsHalfDay && e.leaveHalfDayPeriod) leaveDateText2 += ', half day (' + e.leaveHalfDayPeriod + ')';
       var range = leaveDateText2 ? ('On leave (' + leaveDateText2 + ')') : 'On approved leave';
       result = times ? (range + ' (' + times + ')') : range;
     } else if (status === 'restDay') {
