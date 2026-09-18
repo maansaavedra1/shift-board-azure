@@ -1187,6 +1187,17 @@ async function probeLeaveEndpoints(employeeId) {
     // and a real id would need to come from wherever this criteria gets
     // created in the first place.
     { name: 'Leaves/SearchCriteria (timeattendance prefix, GET)', prefix: 'timeattendance', path: `/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(employeeId)}` },
+    // The 403 (not 404) above confirms this route genuinely exists, and
+    // its error message is specific and actionable: "UserId is
+    // required." This app already has SPROUT_USER_ID configured as an
+    // env var for other purposes — worth trying it directly as a query
+    // parameter here, since the error names the exact missing piece
+    // rather than leaving it to guesswork.
+    { name: 'Leaves/SearchCriteria (with UserId=SPROUT_USER_ID)', prefix: 'timeattendance', path: `/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(employeeId)}&UserId=${encodeURIComponent(process.env.SPROUT_USER_ID || '')}` },
+    // Alternate interpretation of the same missing parameter — UserId
+    // could mean the employee being queried rather than the requesting
+    // account's own configured user id.
+    { name: 'Leaves/SearchCriteria (with UserId=employeeId)', prefix: 'timeattendance', path: `/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(employeeId)}&UserId=${encodeURIComponent(employeeId)}` },
     // Same corrected prefix, tried against the resource names already
     // ruled out under the old spelling — worth re-checking now that the
     // real prefix is known.
