@@ -1158,6 +1158,13 @@ async function probeLeaveEndpoints(employeeId) {
     // and worth checking directly rather than assuming either example
     // is the authoritative one.
     { name: 'Approvals (timeattendance prefix, no "and", no TenantCode)', prefix: 'timeattendance', path: `/api/v1/Approvals?ApproverId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
+    // Confirmed this exact prefix works in sandbox, but production
+    // dropped it entirely via buildApiUrl's normal behavior and every
+    // Approvals/SearchCriteria candidate 404'd there. Forcing the same
+    // /timeattendance/ segment here regardless of environment, to test
+    // whether production needs it too for this specific resource even
+    // though Schedules/Employees don't.
+    { name: 'Approvals (forced timeattendance prefix, any environment)', forceUrl: `/timeattendance/api/v1/Approvals?ApproverId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
     // Confirmed above: this exact prefix/header combo genuinely works,
     // and the real response only ever shows pending items (no approval
     // date). Trying variations under the same confirmed-working setup —
@@ -1212,6 +1219,9 @@ async function probeLeaveEndpoints(employeeId) {
     // SearchCriteriaId, then GET it with that id. Trying a POST with the
     // same UserId header and a plausible search body.
     { name: 'Leaves/SearchCriteria (POST, create search)', prefix: 'timeattendance', path: `/api/v1/Leaves/SearchCriteria`, method: 'POST', extraHeaders: { UserId: process.env.SPROUT_USER_ID || '' }, jsonBody: { EmployeeId: employeeId, DateFrom: dateFromISO, DateTo: dateToISO } },
+    // Same forced-prefix reasoning as Approvals above — try this in
+    // production too, bypassing buildApiUrl's normal no-prefix behavior.
+    { name: 'Leaves/SearchCriteria (POST, forced prefix, any environment)', forceUrl: `/timeattendance/api/v1/Leaves/SearchCriteria`, method: 'POST', extraHeaders: { UserId: process.env.SPROUT_USER_ID || '' }, jsonBody: { EmployeeId: employeeId, DateFrom: dateFromISO, DateTo: dateToISO } },
     // Same corrected prefix, tried against the resource names already
     // ruled out under the old spelling — worth re-checking now that the
     // real prefix is known.
@@ -1222,7 +1232,15 @@ async function probeLeaveEndpoints(employeeId) {
 
   const results = [];
   for (const candidate of candidates) {
-    const url = buildApiUrl(candidate.prefix, candidate.path);
+    // Sandbox and production genuinely differ in whether a resource
+    // needs the service-prefix path segment — confirmed the hard way:
+    // production dropped it entirely (via buildApiUrl's normal
+    // behavior) and every Approvals/SearchCriteria candidate 404'd,
+    // even though the exact same paths work in sandbox. forceUrl lets a
+    // candidate bypass that automatic environment handling and always
+    // include the prefix, to test whether production needs it too for
+    // this specific resource even though Schedules/Employees don't.
+    const url = candidate.forceUrl ? `${getSproutBase()}${candidate.forceUrl}` : buildApiUrl(candidate.prefix, candidate.path);
     const requestHeaders = candidate.extraHeaders ? { ...headers, ...candidate.extraHeaders } : headers;
     const fetchOptions = { headers: requestHeaders };
     if (candidate.method) fetchOptions.method = candidate.method;
@@ -1245,11 +1263,20 @@ async function probeLeaveEndpoints(employeeId) {
   // searchCriteriaId (201). Chain it automatically here — take that id
   // and immediately GET the actual results with it, same UserId header,
   // rather than requiring a second manual round trip with a copy-pasted
-  // id.
-  const createResult = results.find((r) => r.name === 'Leaves/SearchCriteria (POST, create search)');
-  if (createResult && createResult.httpStatus === 201 && createResult.body && createResult.body.searchCriteriaId) {
-    const realId = createResult.body.searchCriteriaId;
-    const followUpUrl = buildApiUrl('timeattendance', `/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(realId)}`);
+  // id. Checks both the normal and forced-prefix POST attempts, since
+  // production and sandbox may need different ones — whichever actually
+  // returned 201 is the one whose matching GET path gets used.
+  const normalCreate = results.find((r) => r.name === 'Leaves/SearchCriteria (POST, create search)');
+  const forcedCreate = results.find((r) => r.name === 'Leaves/SearchCriteria (POST, forced prefix, any environment)');
+  const successfulCreate = (normalCreate && normalCreate.httpStatus === 201) ? { result: normalCreate, forced: false }
+    : (forcedCreate && forcedCreate.httpStatus === 201) ? { result: forcedCreate, forced: true }
+    : null;
+
+  if (successfulCreate && successfulCreate.result.body && successfulCreate.result.body.searchCriteriaId) {
+    const realId = successfulCreate.result.body.searchCriteriaId;
+    const followUpUrl = successfulCreate.forced
+      ? `${getSproutBase()}/timeattendance/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(realId)}`
+      : buildApiUrl('timeattendance', `/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(realId)}`);
     try {
       const followUpHeaders = { ...headers, UserId: process.env.SPROUT_USER_ID || '' };
       const response = await fetchWithRetry(followUpUrl, { headers: followUpHeaders }, 1);
@@ -1257,7 +1284,7 @@ async function probeLeaveEndpoints(employeeId) {
       const bodyText = await response.text();
       let bodyParsed = null;
       try { bodyParsed = JSON.parse(bodyText); } catch (e) { /* keep raw text below */ }
-      results.push({ name: `Leaves/SearchCriteria (GET, real id: ${realId})`, url: followUpUrl, httpStatus: status, body: bodyParsed || bodyText.slice(0, 500) });
+      results.push({ name: `Leaves/SearchCriteria (GET, real id: ${realId}, ${successfulCreate.forced ? 'forced prefix' : 'normal'})`, url: followUpUrl, httpStatus: status, body: bodyParsed || bodyText.slice(0, 500) });
     } catch (err) {
       results.push({ name: 'Leaves/SearchCriteria (GET, real id) — follow-up', url: followUpUrl, error: err.message });
     }
