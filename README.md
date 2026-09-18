@@ -587,6 +587,42 @@ about to override a *different* value already in the environment.
 Confirmed: fires correctly when the saved value differs, stays silent
 when it matches (no false-positive noise on a normal save).
 
+### First real client feedback, two items acted on immediately
+
+**Scheduled shift hours added to Late (Shift Ongoing).** The client
+specifically flagged this for graveyard shift staff — seeing "Late
+(Shift Ongoing)" alone gives no way to tell whether someone's overnight
+shift is about to end in ten minutes or nine hours. Now shows e.g.
+"Shift: 9:00PM – 6:00AM" alongside the existing reason, for anyone in
+this category. Confirmed with a real overnight-shift case, including
+the correct handling of a shift that crosses midnight.
+
+**Leave type restored to the display.** Removed earlier in this project
+per an explicit request to focus on the reconstructed date range
+instead; the client has now asked for it back for tracking and
+validation. Appended after the date range — e.g. "On leave (Sep 10,
+2026) — Vacation", or "On AM leave (Sep 10, 2026) — Sick" for a half
+day. Confirmed both independently and combined with the AM/PM half-day
+format.
+
+**On "leave approval date," also requested:** every real leave record
+seen from Sprout throughout this project — across dozens of real
+employees, multiple leave types, both sandbox and production — has only
+ever included `type`, `paid`, `isWhole`, and `isFirstHalf`. No approval
+date or similar field has appeared in any of them. This isn't confirmed
+absent (a live check specifically for this field hasn't been done), but
+nothing seen so far suggests it's available through the endpoint this
+app already uses. Worth a direct check before promising it.
+
+**Two other items from the same feedback are flagged but not yet
+acted on:** a report that graveyard staff who have genuinely checked in
+are still showing as Late (Shift Ongoing) — which shouldn't happen,
+since that category is specifically for no check-in yet — and a report
+that data changes between refreshes in a way that's hard to verify.
+Both need a concrete real example (a specific employee, an approximate
+time) before they can be investigated properly; sitting behind
+"needs more information," not dismissed.
+
 ### Login is required
 
 There's a full System ID + password login system — see the

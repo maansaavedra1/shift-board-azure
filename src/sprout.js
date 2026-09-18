@@ -681,7 +681,18 @@ function classifyEmployeeForDay(emp, dayContext) {
     if (shiftHasEnded) {
       return { status: 'didNotReport', entry: { name, ...contactInfo, loginTime, logoutTime, reason: 'no log-in or log-out, shift already ended' } };
     }
-    return { status: 'late', entry: { name, ...contactInfo, loginTime, logoutTime, reason: 'no log-in yet, shift still ongoing' } };
+    // Scheduled shift start/end included here specifically per client
+    // feedback — someone reviewing "Late (Shift Ongoing)" has no way to
+    // tell how late is late, or when a graveyard shift is actually due
+    // to end, without knowing the employee's own scheduled hours.
+    return {
+      status: 'late',
+      entry: {
+        name, ...contactInfo, loginTime, logoutTime, reason: 'no log-in yet, shift still ongoing',
+        scheduledShiftStart: shiftStartBoundary ? shiftStartBoundary.toISOString() : null,
+        scheduledShiftEnd: shiftEndBoundary ? shiftEndBoundary.toISOString() : null
+      }
+    };
   }
 
   if (!shiftStartBoundary) {

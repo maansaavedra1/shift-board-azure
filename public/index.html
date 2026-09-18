@@ -1109,6 +1109,17 @@
       result = timesHtml || '—';
     } else if (status === 'late' || status === 'didNotReport') {
       var reason = escapeHtml(e.reason || '');
+      // Scheduled shift hours shown specifically for Late (Shift
+      // Ongoing) — per client feedback, there was no way to tell how
+      // late is late, or when a graveyard shift is actually due to end,
+      // without knowing the employee's own scheduled hours.
+      if (status === 'late' && e.scheduledShiftStart) {
+        var shiftStartDisp = formatLogTime(e.scheduledShiftStart);
+        var shiftEndDisp = formatLogTime(e.scheduledShiftEnd);
+        if (shiftStartDisp && shiftEndDisp) {
+          reason += (reason ? ' · ' : '') + 'Shift: ' + escapeHtml(shiftStartDisp) + ' – ' + escapeHtml(shiftEndDisp);
+        }
+      }
       result = timesHtml ? (reason ? (reason + ' — ' + timesHtml) : timesHtml) : (reason || '—');
     } else if (status === 'onLeave') {
       var leaveDateText = '';
@@ -1123,6 +1134,10 @@
       // it, so it reads naturally instead of like an afterthought.
       var leavePrefix = (e.leaveIsHalfDay && e.leaveHalfDayPeriod) ? ('On ' + e.leaveHalfDayPeriod + ' leave') : 'On leave';
       var leaveLabel = leaveDateText ? (leavePrefix + ' (' + leaveDateText + ')') : 'On approved leave';
+      // Leave type appended per client feedback — shown for tracking
+      // and validation, not folded into the parentheses so the date
+      // range stays the clearest, most scannable part of the label.
+      if (e.leaveType) leaveLabel += ' — ' + e.leaveType;
       var range = escapeHtml(leaveLabel);
       // Logs during approved leave are worth flagging visually — someone
       // checking in while marked on leave is worth a second look, so this
@@ -1152,6 +1167,13 @@
       result = times || '—';
     } else if (status === 'late' || status === 'didNotReport') {
       var reason = e.reason || '';
+      if (status === 'late' && e.scheduledShiftStart) {
+        var shiftStartDisp2 = formatLogTime(e.scheduledShiftStart);
+        var shiftEndDisp2 = formatLogTime(e.scheduledShiftEnd);
+        if (shiftStartDisp2 && shiftEndDisp2) {
+          reason += (reason ? ' · ' : '') + 'Shift: ' + shiftStartDisp2 + ' – ' + shiftEndDisp2;
+        }
+      }
       result = times ? (reason ? (reason + ' — ' + times) : times) : (reason || '—');
     } else if (status === 'onLeave') {
       var leaveDateText2 = '';
@@ -1162,6 +1184,7 @@
       }
       var leavePrefix2 = (e.leaveIsHalfDay && e.leaveHalfDayPeriod) ? ('On ' + e.leaveHalfDayPeriod + ' leave') : 'On leave';
       var range = leaveDateText2 ? (leavePrefix2 + ' (' + leaveDateText2 + ')') : 'On approved leave';
+      if (e.leaveType) range += ' — ' + e.leaveType;
       result = times ? (range + ' (' + times + ')') : range;
     } else if (status === 'restDay') {
       var restLabel2 = e.holidayName ? ('Holiday (' + e.holidayName + ')') : 'On rest day';
