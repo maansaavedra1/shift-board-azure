@@ -1173,6 +1173,12 @@ async function probeLeaveEndpoints(employeeId) {
     // worth checking whether Approvals lives there too in production.
     { name: 'Approvals (api.sprout.ph host, production only)', forceFullUrl: `https://api.sprout.ph/timeattendance/api/v1/Approvals?ApproverId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
     { name: 'Approvals (api.sprout.ph host, no prefix)', forceFullUrl: `https://api.sprout.ph/api/v1/Approvals?ApproverId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
+    // Confirmed above: api.sprout.ph + /timeattendance/ prefix is the
+    // real, working production host/path combination — 200, not 404.
+    // Testing Leaves/SearchCriteria (the actual resource with real leave
+    // records and dateOfLastAction) under this same confirmed-correct
+    // combination.
+    { name: 'Leaves/SearchCriteria (POST, api.sprout.ph host, production)', forceFullUrl: `https://api.sprout.ph/timeattendance/api/v1/Leaves/SearchCriteria`, method: 'POST', extraHeaders: { UserId: process.env.SPROUT_USER_ID || '' }, jsonBody: { EmployeeId: employeeId, DateFrom: dateFromISO, DateTo: dateToISO } },
     // Confirmed above: this exact prefix/header combo genuinely works,
     // and the real response only ever shows pending items (no approval
     // date). Trying variations under the same confirmed-working setup —
@@ -1278,13 +1284,17 @@ async function probeLeaveEndpoints(employeeId) {
   // returned 201 is the one whose matching GET path gets used.
   const normalCreate = results.find((r) => r.name === 'Leaves/SearchCriteria (POST, create search)');
   const forcedCreate = results.find((r) => r.name === 'Leaves/SearchCriteria (POST, forced prefix, any environment)');
-  const successfulCreate = (normalCreate && normalCreate.httpStatus === 201) ? { result: normalCreate, forced: false }
-    : (forcedCreate && forcedCreate.httpStatus === 201) ? { result: forcedCreate, forced: true }
+  const prodHostCreate = results.find((r) => r.name === 'Leaves/SearchCriteria (POST, api.sprout.ph host, production)');
+  const successfulCreate = (normalCreate && normalCreate.httpStatus === 201) ? { result: normalCreate, mode: 'normal' }
+    : (forcedCreate && forcedCreate.httpStatus === 201) ? { result: forcedCreate, mode: 'forced' }
+    : (prodHostCreate && prodHostCreate.httpStatus === 201) ? { result: prodHostCreate, mode: 'prodHost' }
     : null;
 
   if (successfulCreate && successfulCreate.result.body && successfulCreate.result.body.searchCriteriaId) {
     const realId = successfulCreate.result.body.searchCriteriaId;
-    const followUpUrl = successfulCreate.forced
+    const followUpUrl = successfulCreate.mode === 'prodHost'
+      ? `https://api.sprout.ph/timeattendance/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(realId)}`
+      : successfulCreate.mode === 'forced'
       ? `${getSproutBase()}/timeattendance/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(realId)}`
       : buildApiUrl('timeattendance', `/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(realId)}`);
     try {
@@ -1294,7 +1304,7 @@ async function probeLeaveEndpoints(employeeId) {
       const bodyText = await response.text();
       let bodyParsed = null;
       try { bodyParsed = JSON.parse(bodyText); } catch (e) { /* keep raw text below */ }
-      results.push({ name: `Leaves/SearchCriteria (GET, real id: ${realId}, ${successfulCreate.forced ? 'forced prefix' : 'normal'})`, url: followUpUrl, httpStatus: status, body: bodyParsed || bodyText.slice(0, 500) });
+      results.push({ name: `Leaves/SearchCriteria (GET, real id: ${realId}, ${successfulCreate.mode})`, url: followUpUrl, httpStatus: status, body: bodyParsed || bodyText.slice(0, 500) });
     } catch (err) {
       results.push({ name: 'Leaves/SearchCriteria (GET, real id) — follow-up', url: followUpUrl, error: err.message });
     }
