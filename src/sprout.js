@@ -1241,6 +1241,28 @@ async function probeLeaveEndpoints(employeeId) {
       results.push({ name: candidate.name, url, error: err.message });
     }
   }
+  // Confirmed above: POST creates a search and returns a real
+  // searchCriteriaId (201). Chain it automatically here — take that id
+  // and immediately GET the actual results with it, same UserId header,
+  // rather than requiring a second manual round trip with a copy-pasted
+  // id.
+  const createResult = results.find((r) => r.name === 'Leaves/SearchCriteria (POST, create search)');
+  if (createResult && createResult.httpStatus === 201 && createResult.body && createResult.body.searchCriteriaId) {
+    const realId = createResult.body.searchCriteriaId;
+    const followUpUrl = buildApiUrl('timeattendance', `/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(realId)}`);
+    try {
+      const followUpHeaders = { ...headers, UserId: process.env.SPROUT_USER_ID || '' };
+      const response = await fetchWithRetry(followUpUrl, { headers: followUpHeaders }, 1);
+      const status = response.status;
+      const bodyText = await response.text();
+      let bodyParsed = null;
+      try { bodyParsed = JSON.parse(bodyText); } catch (e) { /* keep raw text below */ }
+      results.push({ name: `Leaves/SearchCriteria (GET, real id: ${realId})`, url: followUpUrl, httpStatus: status, body: bodyParsed || bodyText.slice(0, 500) });
+    } catch (err) {
+      results.push({ name: 'Leaves/SearchCriteria (GET, real id) — follow-up', url: followUpUrl, error: err.message });
+    }
+  }
+
   return results;
 }
 
