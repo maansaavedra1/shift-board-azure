@@ -364,19 +364,30 @@
   .compact .emp-name { font-size: 12px; }
   .emp-name { font-family: var(--font-display); font-weight: 600; font-size: 14px; }
   .mono-cell { color: var(--text-muted); }
-  /* Previously forced onto one line, which quietly clipped content once
-     Detail entries got longer (leave type, AM/PM, shift hours, an
-     anomaly log all in the same cell) — combined with the group
-     container's overflow:hidden, this cut text off with no visual
-     indication anything was missing. Wraps naturally now, same as
-     every other column. */
-  /* Kept on one line where possible — a shorter, smaller-font line reads
-     faster than a wrapped one, especially in a table someone's scanning
-     down. text-overflow:ellipsis is the safety net: if a genuinely long
-     entry still doesn't fit, it truncates visibly with "…" rather than
-     the previous behavior, where excess text was silently clipped with
-     no indication anything was missing. */
-  td[data-label="Detail"] { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; max-width: 1px; width: 100%; }
+  /* Kept on one line, and given as much room as possible — Department
+     and Supervisor are capped narrower (below) specifically to free up
+     space for this column, since real leave/late entries can carry a
+     type, AM/PM, shift hours and an anomaly log together in one cell.
+     text-overflow:ellipsis stays only as a last-resort safety net for
+     something genuinely extreme — with the freed-up space and smaller
+     font, real content (confirmed against the actual reported case)
+     now fits completely without truncating. */
+  td[data-label="Detail"] { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+  th:nth-child(2), td[data-label="Department"],
+  th:nth-child(3), td[data-label="Supervisor"] {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px;
+  }
+  /* table-layout:fixed (set above) takes its column widths from the
+     header row's own width, not from max-width on body cells — the
+     earlier attempt to narrow Department/Supervisor via max-width on
+     <td> had no effect for exactly this reason. Set here instead, on
+     the header cells that actually determine it, so Detail — which
+     regularly carries a leave type, AM/PM, shift hours and an anomaly
+     log together — gets the space it actually needs. */
+  thead th:nth-child(1) { width: 22%; }
+  thead th:nth-child(2) { width: 11%; }
+  thead th:nth-child(3) { width: 11%; }
+  thead th:nth-child(4) { width: 56%; }
 
   #scrollTopBtn {
     position: fixed;

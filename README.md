@@ -631,13 +631,31 @@ text genuinely no longer fit — and `white-space: nowrap` combined with
 the table's `overflow: hidden` was cutting it off completely silently,
 with no visual indication anything was missing. First fix (allowing the
 cell to wrap) worked but produced tall, awkward multi-line rows in a
-table meant to be scanned quickly. Settled on: one line, a smaller font
-(12.5px) to fit more before truncating, and `text-overflow: ellipsis` as
-a visible safety net — so a genuinely long entry now truncates with "…"
-instead of vanishing invisibly. Confirmed against the real reported case
-and an intentionally extreme one; both now compress to one line, with
-the safety net firing visibly on the more extreme case rather than
-silently losing content.
+table meant to be scanned quickly.
+
+Went through two more rounds after that, both driven by real
+measurement rather than guessing:
+
+- **A smaller font alone wasn't enough.** Reducing Detail's font and
+  narrowing Department/Supervisor via `max-width` had *no effect at
+  all* — this table uses `table-layout: fixed`, and under fixed layout
+  the browser sizes columns from the *header* row's width, not from any
+  `max-width` set on body cells. The narrowing code was silently doing
+  nothing.
+- **Fixed by setting explicit percentage widths on the header cells
+  instead** — Employee 22%, Department 11%, Supervisor 11%, Detail 56%
+  — which is what fixed layout actually respects. Combined with an
+  11px font on Detail, this closes the gap completely for real content:
+  measured the exact reported case directly (`scrollWidth -
+  clientWidth`) and confirmed it now needs exactly 0px more than it
+  has, rather than assuming a font size "looks about right."
+
+`text-overflow: ellipsis` stays as a last-resort safety net for
+something genuinely extreme — confirmed with an intentionally absurd
+leave-type name that it still truncates visibly with "…" rather than
+vanishing invisibly, while the real reported case, and a graveyard-shift
+case with scheduled hours, both now display completely on one line with
+no truncation at all.
 
 ### Login is required
 
