@@ -1179,6 +1179,19 @@ async function probeLeaveEndpoints(employeeId) {
     // records and dateOfLastAction) under this same confirmed-correct
     // combination.
     { name: 'Leaves/SearchCriteria (POST, api.sprout.ph host, production)', forceFullUrl: `https://api.sprout.ph/timeattendance/api/v1/Leaves/SearchCriteria`, method: 'POST', extraHeaders: { UserId: process.env.SPROUT_USER_ID || '' }, jsonBody: { EmployeeId: employeeId, DateFrom: dateFromISO, DateTo: dateToISO } },
+    // Confirmed across 371 real production records: dateOfLastAction
+    // never differs from dateFiled in the list/search view, for any
+    // status (approved, rejected, cancelled). Worth checking whether a
+    // single-record "detail" endpoint exposes more than the list view
+    // does — a common API pattern where list responses are trimmed and
+    // a by-id lookup returns the full record. Testing this pattern
+    // directly on Leaves with a real, known request id (2227, Sarah's
+    // confirmed half-day leave from sandbox) rather than an employeeId.
+    { name: 'Leaves/:id (sandbox, real request id)', prefix: 'timeattendance', path: `/api/v1/Leaves/2227`, extraHeaders: { UserId: process.env.SPROUT_USER_ID || '' } },
+    // Same pattern, but for CertificateOfAttendances specifically, as
+    // asked — a different request type (COA), tested the same way to
+    // see if by-id detail views work generally on this API.
+    { name: 'CertificateOfAttendances/:id (sandbox)', prefix: 'timeattendance', path: `/api/v1/CertificateOfAttendances/1`, extraHeaders: { UserId: process.env.SPROUT_USER_ID || '' } },
     // Confirmed above: this exact prefix/header combo genuinely works,
     // and the real response only ever shows pending items (no approval
     // date). Trying variations under the same confirmed-working setup —
