@@ -1165,6 +1165,14 @@ async function probeLeaveEndpoints(employeeId) {
     // whether production needs it too for this specific resource even
     // though Schedules/Employees don't.
     { name: 'Approvals (forced timeattendance prefix, any environment)', forceUrl: `/timeattendance/api/v1/Approvals?ApproverId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
+    // Also 404'd even with the prefix forced — genuinely not reachable
+    // on this host at all in production, not just a path issue. The
+    // original Leaves/SearchCriteria investigation, much earlier in this
+    // project, found this exact resource living on a completely
+    // different host (api.sprout.ph) rather than clients.hrhub.ph —
+    // worth checking whether Approvals lives there too in production.
+    { name: 'Approvals (api.sprout.ph host, production only)', forceFullUrl: `https://api.sprout.ph/timeattendance/api/v1/Approvals?ApproverId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
+    { name: 'Approvals (api.sprout.ph host, no prefix)', forceFullUrl: `https://api.sprout.ph/api/v1/Approvals?ApproverId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
     // Confirmed above: this exact prefix/header combo genuinely works,
     // and the real response only ever shows pending items (no approval
     // date). Trying variations under the same confirmed-working setup —
@@ -1240,7 +1248,9 @@ async function probeLeaveEndpoints(employeeId) {
     // candidate bypass that automatic environment handling and always
     // include the prefix, to test whether production needs it too for
     // this specific resource even though Schedules/Employees don't.
-    const url = candidate.forceUrl ? `${getSproutBase()}${candidate.forceUrl}` : buildApiUrl(candidate.prefix, candidate.path);
+    const url = candidate.forceFullUrl ? candidate.forceFullUrl
+      : candidate.forceUrl ? `${getSproutBase()}${candidate.forceUrl}`
+      : buildApiUrl(candidate.prefix, candidate.path);
     const requestHeaders = candidate.extraHeaders ? { ...headers, ...candidate.extraHeaders } : headers;
     const fetchOptions = { headers: requestHeaders };
     if (candidate.method) fetchOptions.method = candidate.method;
