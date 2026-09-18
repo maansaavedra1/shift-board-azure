@@ -1400,10 +1400,22 @@ async function getLeaveApprovalDate(employeeId, dayKey) {
     throw new Error(`Could not retrieve leave search results (HTTP ${listResponse.status})`);
   }
   const listData = await listResponse.json();
+  // The EmployeeId filter sent when creating the search does not appear
+  // to actually restrict Sprout's results to one employee — confirmed
+  // by a real production test earlier, where a search filtered to one
+  // employee still returned 371 records across dozens of different
+  // people. Matching by date range alone (as this used to) meant
+  // whichever employee's leave happened to come first in the list for
+  // that date won — a real, confirmed bug where different employees
+  // showed identical approval timestamps that actually belonged to
+  // someone else entirely. Checking employeeId explicitly now, not just
+  // the date range, and comparing as strings since Sprout returns this
+  // field as a number while callers may pass either type.
   const match = (listData.data || []).find((rec) => {
     const from = rec.dateFrom ? rec.dateFrom.substring(0, 10) : null;
     const to = rec.dateTo ? rec.dateTo.substring(0, 10) : null;
-    return from && to && dayKey >= from && dayKey <= to;
+    const sameEmployee = rec.employeeId != null && String(rec.employeeId) === String(employeeId);
+    return sameEmployee && from && to && dayKey >= from && dayKey <= to;
   });
   if (!match) {
     throw new Error('No matching leave record found for this employee and date.');

@@ -664,6 +664,23 @@ successful lookup, and gracefully shows "Approval date not available
 right now" rather than failing silently when no matching record is
 found.
 
+**Real bug found immediately on the first production test.** Different
+employees were showing identical approval dates and times — a genuine
+correctness bug, not a display issue. Root cause: the search results
+were being matched to a leave by date range alone, with no check that
+the record actually belonged to the requested employee. Confirmed
+directly: the `EmployeeId` filter sent when creating the search does not
+reliably restrict Sprout's results to just that one employee — the same
+371-record production test that confirmed `dateOfLastAction`'s behavior
+also showed dozens of *different* employees' records coming back for a
+single-employee request. On any date with more than one person's leave,
+the old code silently returned whoever happened to appear first in the
+list, regardless of who it actually belonged to. Fixed by checking
+`employeeId` explicitly, not just the date range. Confirmed with a real
+test: three different employees sharing the same date, the corrected
+version now picks the exact record actually belonging to the requested
+employee, not the first or last one found.
+
 ### Detail column was silently clipping longer entries
 
 A real, screenshotted case: once a leave row started carrying the AM/PM
