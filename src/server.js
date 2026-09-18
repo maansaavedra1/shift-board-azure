@@ -1,7 +1,7 @@
 const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
-const { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, probeLeaveEndpoints } = require('./sprout');
+const { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, probeLeaveEndpoints, getLeaveApprovalDate } = require('./sprout');
 const configStore = require('./config-store');
 const authStore = require('./auth-store');
 
@@ -298,6 +298,27 @@ app.get('/api/debug/probe-leave-endpoints', async (req, res) => {
   } catch (err) {
     console.error('Leave endpoint probe failed:', err.message);
     return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// On-demand only, per an explicit decision to keep this at zero added
+// Sprout API cost until an admin actually requests it — never called
+// from the background sync. Query with ?employeeId=<id>&date=<YYYY-MM-DD>.
+app.get('/api/leave-approval-date', async (req, res) => {
+  try {
+    const employeeId = parseInt(req.query.employeeId, 10);
+    const dayKey = req.query.date;
+    if (!employeeId || !dayKey || !/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+      return res.status(400).json({ ok: false, error: 'Provide ?employeeId=<id>&date=<YYYY-MM-DD>.' });
+    }
+    const result = await getLeaveApprovalDate(employeeId, dayKey);
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    // Logged with detail server-side; kept generic for the client since
+    // this reflects Sprout's own response shape, which shouldn't leak
+    // directly to the browser.
+    console.error('Leave approval date lookup failed:', err.message);
+    return res.status(502).json({ ok: false, error: 'Could not retrieve the approval date right now.' });
   }
 });
 

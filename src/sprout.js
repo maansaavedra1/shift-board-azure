@@ -626,6 +626,12 @@ function classifyEmployeeForDay(emp, dayContext) {
         leaveType: types || 'Leave',
         leaveIsHalfDay: !!halfDayEntry,
         leaveHalfDayPeriod: halfDayPeriod,
+        // The specific day this row represents — distinct from
+        // leaveFrom/leaveTo below, which is the reconstructed *range*
+        // and stays the same across every day of a multi-day leave. This
+        // is what the on-demand approval-date lookup needs, since it has
+        // to search around one specific day, not the whole range.
+        viewedDayKey: dayContext.dayKey,
         leaveFrom: range ? range.startKey : dayContext.dayKey,
         leaveTo: range ? range.endKey : dayContext.dayKey,
         // Honest truncation markers — a leave longer than the walk cap
@@ -1346,4 +1352,78 @@ async function probeLeaveEndpoints(employeeId) {
   return results;
 }
 
-module.exports = { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, findEmployeeByName, getRawScheduleForEmployee, probeLeaveEndpoints };
+// On-demand only — never called from the background sync, deliberately,
+// per the decision to keep this at zero added Sprout API cost until an
+// admin actually asks for it. Confirmed working combination: production
+// uses api.sprout.ph (not the usual clients.hrhub.ph this app calls
+// everywhere else) with the timeattendance prefix; sandbox uses its own
+// gateway host with the same prefix. Both need a UserId header, which
+// none of this app's other calls have ever required.
+//
+// Two real API calls per lookup, and there's no way around it: the
+// Schedules response this app already caches doesn't carry a leave's
+// own id, only its type/dates — so the id has to be found first via a
+// search, then used to fetch the one record that actually has
+// dateApproved. Confirmed: dateApproved is a real field distinct from
+// dateFiled, but no approver identity field appears on this response
+// (CertificateOfAttendances has approvedByID; this endpoint does not).
+async function getLeaveApprovalDate(employeeId, dayKey) {
+  const headers = await sproutHeaders();
+  const userIdHeader = { UserId: process.env.SPROUT_USER_ID || '' };
+  const base = isSandboxEnvironment() ? 'https://gateway-sb.sprout.ph' : 'https://api.sprout.ph';
+
+  // Step 1: create a search narrowly scoped to this one employee and a
+  // window around the day in question — no need to search their whole
+  // history just to find one leave's id.
+  const dayDate = new Date(`${dayKey}T00:00:00`);
+  const windowStart = formatDateKey(new Date(dayDate.getTime() - 3 * 24 * 60 * 60 * 1000));
+  const windowEnd = formatDateKey(new Date(dayDate.getTime() + 3 * 24 * 60 * 60 * 1000));
+
+  const createUrl = `${base}/timeattendance/api/v1/Leaves/SearchCriteria`;
+  const createResponse = await fetchWithRetry(createUrl, {
+    method: 'POST',
+    headers: { ...headers, ...userIdHeader, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ EmployeeId: employeeId, DateFrom: `${windowStart}T00:00:00`, DateTo: `${windowEnd}T23:59:59` })
+  });
+  if (createResponse.status !== 201) {
+    throw new Error(`Could not start leave search (HTTP ${createResponse.status})`);
+  }
+  const created = await createResponse.json();
+  const searchCriteriaId = created.searchCriteriaId;
+
+  // Step 2: retrieve the search results and find the one record that
+  // actually matches this day — a ±3 day window can still return more
+  // than one leave for a busy employee.
+  const listUrl = `${base}/timeattendance/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(searchCriteriaId)}`;
+  const listResponse = await fetchWithRetry(listUrl, { headers: { ...headers, ...userIdHeader } });
+  if (listResponse.status !== 200) {
+    throw new Error(`Could not retrieve leave search results (HTTP ${listResponse.status})`);
+  }
+  const listData = await listResponse.json();
+  const match = (listData.data || []).find((rec) => {
+    const from = rec.dateFrom ? rec.dateFrom.substring(0, 10) : null;
+    const to = rec.dateTo ? rec.dateTo.substring(0, 10) : null;
+    return from && to && dayKey >= from && dayKey <= to;
+  });
+  if (!match) {
+    throw new Error('No matching leave record found for this employee and date.');
+  }
+
+  // Step 3: the one call that actually has dateApproved — confirmed
+  // this is a real, distinct field, not the same value as dateFiled
+  // relabeled.
+  const detailUrl = `${base}/timeattendance/api/v1/Leave/${encodeURIComponent(match.id)}`;
+  const detailResponse = await fetchWithRetry(detailUrl, { headers: { ...headers, ...userIdHeader } });
+  if (detailResponse.status !== 200) {
+    throw new Error(`Could not retrieve leave detail (HTTP ${detailResponse.status})`);
+  }
+  const detail = await detailResponse.json();
+  return {
+    dateApproved: detail.dateApproved || null,
+    dateFiled: detail.dateFiled || null,
+    leaveType: detail.leaveTypeName || null,
+    statusId: detail.requestStatusId != null ? detail.requestStatusId : null
+  };
+}
+
+module.exports = { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, findEmployeeByName, getRawScheduleForEmployee, probeLeaveEndpoints, getLeaveApprovalDate };

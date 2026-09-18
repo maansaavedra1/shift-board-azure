@@ -810,7 +810,7 @@
   // summary card's overflow:hidden (needed for its rounded-corner accent
   // strip) rather than getting clipped inside it.
   var sharedTooltip = document.getElementById('sharedTooltip');
-  document.querySelectorAll('.info-icon').forEach(function (icon) {
+  document.querySelectorAll('.info-icon:not(.lazy-tooltip)').forEach(function (icon) {
     function showTooltip() {
       sharedTooltip.textContent = icon.getAttribute('data-tooltip');
       var rect = icon.getBoundingClientRect();
@@ -829,6 +829,80 @@
     icon.addEventListener('mouseleave', hideTooltip);
     icon.addEventListener('focus', showTooltip);
     icon.addEventListener('blur', hideTooltip);
+  });
+
+  // Lazy-fetched approval-date tooltips — these icons are added
+  // dynamically on every report render (unlike the static ones above,
+  // which exist from page load), so a one-time querySelectorAll won't
+  // ever see them. Event delegation on a stable ancestor instead, using
+  // mouseover/mouseout (which bubble, unlike mouseenter/mouseleave) with
+  // a closest() check and a relatedTarget guard so moving between the
+  // icon's own child elements (e.g. its inner <svg>) doesn't fire
+  // spurious enter/leave pairs.
+  var approvalDateCache = {}; // keyed "employeeId|dayKey" — fetched at most once per pair per page load
+  function positionTooltip(target) {
+    var rect = target.getBoundingClientRect();
+    sharedTooltip.classList.add('visible');
+    var tooltipRect = sharedTooltip.getBoundingClientRect();
+    var left = rect.left + rect.width / 2 - tooltipRect.width / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - tooltipRect.width - 8));
+    sharedTooltip.style.left = left + 'px';
+    sharedTooltip.style.top = (rect.top - tooltipRect.height - 8) + 'px';
+  }
+  function formatApprovalTooltip(data) {
+    if (!data.dateApproved) return 'Approval date not available for this leave.';
+    var d = new Date(data.dateApproved);
+    if (isNaN(d.getTime())) return 'Approval date not available for this leave.';
+    return 'Approved ' + d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
+      + ' at ' + d.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' });
+  }
+  async function showLazyTooltip(icon) {
+    var employeeId = icon.getAttribute('data-lazy-employee');
+    var dayKey = icon.getAttribute('data-lazy-date');
+    var cacheKey = employeeId + '|' + dayKey;
+    sharedTooltip.textContent = 'Loading…';
+    positionTooltip(icon);
+
+    if (approvalDateCache[cacheKey]) {
+      sharedTooltip.textContent = approvalDateCache[cacheKey];
+      positionTooltip(icon);
+      return;
+    }
+    try {
+      var res = await fetch('/api/leave-approval-date?employeeId=' + encodeURIComponent(employeeId) + '&date=' + encodeURIComponent(dayKey));
+      var data = await res.json();
+      var text = (res.ok && data.ok) ? formatApprovalTooltip(data) : 'Approval date not available right now.';
+      approvalDateCache[cacheKey] = text;
+      // Only update if this same icon is still the one being hovered —
+      // a fast mouse could have already moved elsewhere by the time the
+      // fetch resolves.
+      if (sharedTooltip.classList.contains('visible')) {
+        sharedTooltip.textContent = text;
+        positionTooltip(icon);
+      }
+    } catch (err) {
+      sharedTooltip.textContent = 'Approval date not available right now.';
+    }
+  }
+  document.addEventListener('mouseover', function (e) {
+    var icon = e.target.closest && e.target.closest('.lazy-tooltip');
+    if (!icon) return;
+    if (icon.contains(e.relatedTarget)) return; // moved between the icon's own children, not a real re-entry
+    showLazyTooltip(icon);
+  });
+  document.addEventListener('mouseout', function (e) {
+    var icon = e.target.closest && e.target.closest('.lazy-tooltip');
+    if (!icon) return;
+    if (icon.contains(e.relatedTarget)) return; // still inside the same icon
+    sharedTooltip.classList.remove('visible');
+  });
+  document.addEventListener('focusin', function (e) {
+    var icon = e.target.closest && e.target.closest('.lazy-tooltip');
+    if (icon) showLazyTooltip(icon);
+  });
+  document.addEventListener('focusout', function (e) {
+    var icon = e.target.closest && e.target.closest('.lazy-tooltip');
+    if (icon) sharedTooltip.classList.remove('visible');
   });
 
   function applyTheme(theme) {
@@ -1162,6 +1236,13 @@
       // range stays the clearest, most scannable part of the label.
       if (e.leaveType) leaveLabel += ' — ' + e.leaveType;
       var range = escapeHtml(leaveLabel);
+      // Approval date/time — on demand only, never fetched until
+      // hovered, per an explicit decision to keep this at zero added
+      // Sprout API cost otherwise. Reuses the existing info-icon/tooltip
+      // pattern, extended to fetch lazily instead of showing static text.
+      if (e.systemId && e.viewedDayKey) {
+        range += ' <span class="info-icon lazy-tooltip" data-lazy-employee="' + escapeHtml(String(e.systemId)) + '" data-lazy-date="' + escapeHtml(e.viewedDayKey) + '" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="11"></line><circle cx="12" cy="8" r="0.5" fill="currentColor" stroke="none"></circle></svg></span>';
+      }
       // Logs during approved leave are worth flagging visually — someone
       // checking in while marked on leave is worth a second look, so this
       // gets parentheses + red, unlike the plain log times shown elsewhere.

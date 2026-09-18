@@ -623,6 +623,47 @@ Both need a concrete real example (a specific employee, an approximate
 time) before they can be investigated properly; sitting behind
 "needs more information," not dismissed.
 
+### Leave approval date — found, and built on demand
+
+Found through systematic elimination across several rounds of live
+testing against Sprout's real API, not documentation alone: the working
+endpoint is `GET /timeattendance/api/v1/Leave/:id` — **singular**
+"Leave," not the plural "Leaves" used everywhere else in this file. That
+distinction was the actual blocker; several other plausible names and
+prefix combinations were tried and ruled out first (`Leaves/:id`,
+`Approvals`, various `MyRequest`/`Requests` guesses), each confirmed
+dead by its own distinct error rather than assumed.
+
+This endpoint returns a genuine `dateApproved` field, confirmed against
+real data to be a real, independent value — not `dateFiled` relabeled,
+and matching a real leave's "Date approved" as shown directly in
+Sprout's own UI for the same record. Confirmed **not** available on this
+same response: who approved it. No approver-identity field appears here,
+unlike `CertificateOfAttendances`, which does expose `approvedByID` — so
+only the date/time is being surfaced, not the approver's name.
+
+**Built entirely on-demand, per an explicit decision to keep this at
+zero added Sprout API cost otherwise.** Nothing runs during the
+background sync; a lookup only happens when an admin actually hovers or
+focuses the new icon next to a leave entry. Two real Sprout calls are
+needed per lookup (there's no way around it): the Schedules response
+this app already caches has no leave `id`, only its type/dates, so the
+id has to be found via a scoped search first, then used to fetch the one
+record that actually has `dateApproved`.
+
+`getLeaveApprovalDate()` in `sprout.js` handles the two-call chain; a new
+`/api/leave-approval-date` route (behind the existing login, same as
+every other endpoint) exposes it. The frontend reuses the existing
+info-icon/tooltip pattern already used for summary-card explanations,
+extended with event delegation — these icons are added dynamically on
+every report render, so the page-load-only listener setup used for the
+static tooltips would never see them — plus a simple client-side cache
+so hovering the same entry twice doesn't re-fetch. Confirmed end-to-end
+in a real browser: shows "Approved Sep 18, 2026 at 2:30 PM" on a
+successful lookup, and gracefully shows "Approval date not available
+right now" rather than failing silently when no matching record is
+found.
+
 ### Detail column was silently clipping longer entries
 
 A real, screenshotted case: once a leave row started carrying the AM/PM
