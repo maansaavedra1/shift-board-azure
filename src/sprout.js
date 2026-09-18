@@ -1192,6 +1192,18 @@ async function probeLeaveEndpoints(employeeId) {
     // asked — a different request type (COA), tested the same way to
     // see if by-id detail views work generally on this API.
     { name: 'CertificateOfAttendances/:id (sandbox)', prefix: 'timeattendance', path: `/api/v1/CertificateOfAttendances/1`, extraHeaders: { UserId: process.env.SPROUT_USER_ID || '' } },
+    // A separately pasted curl example documents this exact endpoint
+    // under a genuinely different combination than what's confirmed
+    // working: "timeandattendance" (with "and") + a TenantCode header,
+    // versus the confirmed-working "timeattendance" (no "and") +
+    // UserId header. Same pattern already seen once with Approvals,
+    // where the "with and" + TenantCode variant was a distinct,
+    // separately-blocked path from the working one. The documented body
+    // here is also richer (statusIds, departmentIds, companyIds,
+    // sortColumn) than what was used to successfully create a search —
+    // worth checking whether this is a different endpoint with its own,
+    // possibly more detailed, response shape.
+    { name: 'Leaves/SearchCriteria (POST, "and" prefix + TenantCode, richer body)', prefix: 'timeandattendance', path: `/api/v1/Leaves/SearchCriteria`, method: 'POST', extraHeaders: { TenantCode: process.env.SPROUT_CLIENT_ID || '' }, jsonBody: { dateFrom: dateFromISO, dateTo: dateToISO, sortColumn: 'dateFiled', sortOrder: 'desc', pageNumber: 1, rowsPerPage: 100, employeeIds: [employeeId], statusIds: [4], departmentIds: [], companyIds: [] } },
     // Confirmed above: this exact prefix/header combo genuinely works,
     // and the real response only ever shows pending items (no approval
     // date). Trying variations under the same confirmed-working setup —
