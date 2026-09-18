@@ -1097,14 +1097,15 @@ async function probeLeaveEndpoints(employeeId) {
   const past = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const dateFromISO = `${formatDateKey(past)}T00:00:00`;
   const dateToISO = `${formatDateKey(now)}T23:59:59`;
+  const dateParams = `EmployeeId=${encodeURIComponent(employeeId)}&DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}`;
 
   // Candidates under the same host/prefix Schedules already uses
   // successfully — the most likely place, if anything exists here at all.
   const candidates = [
-    { name: 'Leaves (list, no SearchCriteria)', path: `/api/v1/Leaves?DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}&EmployeeId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
-    { name: 'LeaveApplications', path: `/api/v1/LeaveApplications?DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}&EmployeeId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
-    { name: 'Leaves/{employeeId}', path: `/api/v1/Leaves/${encodeURIComponent(employeeId)}?DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}` },
-    { name: 'EmployeeLeaves', path: `/api/v1/EmployeeLeaves?EmployeeId=${encodeURIComponent(employeeId)}&DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}` },
+    { name: 'Leaves (list, no SearchCriteria)', prefix: 'timeattendance', path: `/api/v1/Leaves?${dateParams}&PageNumber=1&RowsPerPage=100` },
+    { name: 'LeaveApplications', prefix: 'timeattendance', path: `/api/v1/LeaveApplications?${dateParams}&PageNumber=1&RowsPerPage=100` },
+    { name: 'Leaves/{employeeId}', prefix: 'timeattendance', path: `/api/v1/Leaves/${encodeURIComponent(employeeId)}?DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}` },
+    { name: 'EmployeeLeaves', prefix: 'timeattendance', path: `/api/v1/EmployeeLeaves?${dateParams}` },
     // Added based on Sprout's own public docs and support content, not a
     // guess: their Time and Attendance service documentation mentions
     // "trigger 'My Request' approvals for leave or schedule changes",
@@ -1112,17 +1113,27 @@ async function probeLeaveEndpoints(employeeId) {
     // approval workflow covering Leaves, Official Business, Undertime,
     // Overtime, and Schedule Adjustment together — matching a comment
     // found earlier in this project ("StatusId 4 = Approved, same status
-    // enum as Leave/OfficialBusiness/Overtime"). If an approval date
-    // exists anywhere reachable, this shared resource is the most
-    // plausible place for it.
-    { name: 'MyRequest', path: `/api/v1/MyRequest?EmployeeId=${encodeURIComponent(employeeId)}&DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}` },
-    { name: 'MyRequests', path: `/api/v1/MyRequests?EmployeeId=${encodeURIComponent(employeeId)}&DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}` },
-    { name: 'Requests', path: `/api/v1/Requests?EmployeeId=${encodeURIComponent(employeeId)}&DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}` }
+    // enum as Leave/OfficialBusiness/Overtime").
+    { name: 'MyRequest (timeattendance prefix)', prefix: 'timeattendance', path: `/api/v1/MyRequest?${dateParams}` },
+    { name: 'MyRequests (timeattendance prefix)', prefix: 'timeattendance', path: `/api/v1/MyRequests?${dateParams}` },
+    { name: 'Requests (timeattendance prefix)', prefix: 'timeattendance', path: `/api/v1/Requests?${dateParams}` },
+    // A working example in Sprout's own docs for a *different* resource
+    // (Employees) uses a per-service prefix pattern: {host}/empservice/
+    // api/v1/Employees — not the bare /api/v1/ this app's other calls
+    // use in production. If "My Requests" belongs to a different service
+    // category than Time and Attendance (the docs list Employee, HR,
+    // Authorization, and Time and Attendance as separate services), it
+    // may need its own prefix rather than "timeattendance" — "hrservice"
+    // is the most plausible guess given "My Requests" is filed as an HR
+    // action, not strictly a time-and-attendance one.
+    { name: 'MyRequest (hrservice prefix)', prefix: 'hrservice', path: `/api/v1/MyRequest?${dateParams}` },
+    { name: 'MyRequests (hrservice prefix)', prefix: 'hrservice', path: `/api/v1/MyRequests?${dateParams}` },
+    { name: 'Leaves (hrservice prefix)', prefix: 'hrservice', path: `/api/v1/Leaves?${dateParams}` }
   ];
 
   const results = [];
   for (const candidate of candidates) {
-    const url = buildApiUrl('timeattendance', candidate.path);
+    const url = buildApiUrl(candidate.prefix, candidate.path);
     try {
       const response = await fetchWithRetry(url, { headers }, 1); // single attempt — a 404/401 here isn't worth retrying
       const status = response.status;
