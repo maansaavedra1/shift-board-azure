@@ -1104,7 +1104,20 @@ async function probeLeaveEndpoints(employeeId) {
     { name: 'Leaves (list, no SearchCriteria)', path: `/api/v1/Leaves?DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}&EmployeeId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
     { name: 'LeaveApplications', path: `/api/v1/LeaveApplications?DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}&EmployeeId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
     { name: 'Leaves/{employeeId}', path: `/api/v1/Leaves/${encodeURIComponent(employeeId)}?DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}` },
-    { name: 'EmployeeLeaves', path: `/api/v1/EmployeeLeaves?EmployeeId=${encodeURIComponent(employeeId)}&DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}` }
+    { name: 'EmployeeLeaves', path: `/api/v1/EmployeeLeaves?EmployeeId=${encodeURIComponent(employeeId)}&DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}` },
+    // Added based on Sprout's own public docs and support content, not a
+    // guess: their Time and Attendance service documentation mentions
+    // "trigger 'My Request' approvals for leave or schedule changes",
+    // and a Sprout support article confirms "My Requests" is the shared
+    // approval workflow covering Leaves, Official Business, Undertime,
+    // Overtime, and Schedule Adjustment together — matching a comment
+    // found earlier in this project ("StatusId 4 = Approved, same status
+    // enum as Leave/OfficialBusiness/Overtime"). If an approval date
+    // exists anywhere reachable, this shared resource is the most
+    // plausible place for it.
+    { name: 'MyRequest', path: `/api/v1/MyRequest?EmployeeId=${encodeURIComponent(employeeId)}&DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}` },
+    { name: 'MyRequests', path: `/api/v1/MyRequests?EmployeeId=${encodeURIComponent(employeeId)}&DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}` },
+    { name: 'Requests', path: `/api/v1/Requests?EmployeeId=${encodeURIComponent(employeeId)}&DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}` }
   ];
 
   const results = [];
