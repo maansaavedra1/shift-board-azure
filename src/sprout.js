@@ -1198,6 +1198,12 @@ async function probeLeaveEndpoints(employeeId) {
     // could mean the employee being queried rather than the requesting
     // account's own configured user id.
     { name: 'Leaves/SearchCriteria (with UserId=employeeId)', prefix: 'timeattendance', path: `/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(employeeId)}&UserId=${encodeURIComponent(employeeId)}` },
+    // Both query-parameter attempts above returned the identical error,
+    // suggesting the parameter itself may be in the wrong place rather
+    // than holding the wrong value — TenantCode on other endpoints was a
+    // header, not a query parameter, so trying the same pattern here.
+    { name: 'Leaves/SearchCriteria (UserId as header)', prefix: 'timeattendance', path: `/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(employeeId)}`, extraHeaders: { UserId: String(employeeId) } },
+    { name: 'Leaves/SearchCriteria (UserId header = SPROUT_USER_ID)', prefix: 'timeattendance', path: `/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(employeeId)}`, extraHeaders: { UserId: process.env.SPROUT_USER_ID || '' } },
     // Same corrected prefix, tried against the resource names already
     // ruled out under the old spelling — worth re-checking now that the
     // real prefix is known.
