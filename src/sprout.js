@@ -1204,6 +1204,14 @@ async function probeLeaveEndpoints(employeeId) {
     // header, not a query parameter, so trying the same pattern here.
     { name: 'Leaves/SearchCriteria (UserId as header)', prefix: 'timeattendance', path: `/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(employeeId)}`, extraHeaders: { UserId: String(employeeId) } },
     { name: 'Leaves/SearchCriteria (UserId header = SPROUT_USER_ID)', prefix: 'timeattendance', path: `/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(employeeId)}`, extraHeaders: { UserId: process.env.SPROUT_USER_ID || '' } },
+    // The 404 "Search Criteria not found" above confirms UserId-as-header
+    // was the actual fix — the made-up SearchCriteriaId simply doesn't
+    // exist yet. This looks like a create-then-retrieve pattern (same
+    // shape as ArchivedAttendanceLogs/SearchCriteria in the docs already
+    // shared): POST here first to register a search and get back a real
+    // SearchCriteriaId, then GET it with that id. Trying a POST with the
+    // same UserId header and a plausible search body.
+    { name: 'Leaves/SearchCriteria (POST, create search)', prefix: 'timeattendance', path: `/api/v1/Leaves/SearchCriteria`, method: 'POST', extraHeaders: { UserId: process.env.SPROUT_USER_ID || '' }, jsonBody: { EmployeeId: employeeId, DateFrom: dateFromISO, DateTo: dateToISO } },
     // Same corrected prefix, tried against the resource names already
     // ruled out under the old spelling — worth re-checking now that the
     // real prefix is known.
@@ -1216,8 +1224,14 @@ async function probeLeaveEndpoints(employeeId) {
   for (const candidate of candidates) {
     const url = buildApiUrl(candidate.prefix, candidate.path);
     const requestHeaders = candidate.extraHeaders ? { ...headers, ...candidate.extraHeaders } : headers;
+    const fetchOptions = { headers: requestHeaders };
+    if (candidate.method) fetchOptions.method = candidate.method;
+    if (candidate.jsonBody) {
+      fetchOptions.headers = { ...fetchOptions.headers, 'Content-Type': 'application/json' };
+      fetchOptions.body = JSON.stringify(candidate.jsonBody);
+    }
     try {
-      const response = await fetchWithRetry(url, { headers: requestHeaders }, 1); // single attempt — a 404/401 here isn't worth retrying
+      const response = await fetchWithRetry(url, fetchOptions, 1); // single attempt — a 404/401 here isn't worth retrying
       const status = response.status;
       const bodyText = await response.text();
       let bodyParsed = null;
