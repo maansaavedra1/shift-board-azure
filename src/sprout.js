@@ -1143,6 +1143,13 @@ async function probeLeaveEndpoints(employeeId) {
     // different shape than "an employee's own history" — so a real
     // approver's ID is needed to test this meaningfully.
     { name: 'Approvals (timeandattendance prefix, by ApproverId)', prefix: 'timeandattendance', path: `/api/v1/Approvals?ApproverId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
+    // The 401 (not 404) on the first pass confirms this route genuinely
+    // exists. Sprout's own docs list a required TenantCode header ("Sprout
+    // Client Id") for this endpoint specifically — something sproutHeaders()
+    // has never sent, since no other endpoint this app calls has needed it.
+    // Added here only, not globally, so this test can't affect any other,
+    // already-working call.
+    { name: 'Approvals (with TenantCode header)', prefix: 'timeandattendance', path: `/api/v1/Approvals?ApproverId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100`, extraHeaders: { TenantCode: process.env.SPROUT_CLIENT_ID } },
     // Same corrected prefix, tried against the resource names already
     // ruled out under the old spelling — worth re-checking now that the
     // real prefix is known.
@@ -1154,8 +1161,9 @@ async function probeLeaveEndpoints(employeeId) {
   const results = [];
   for (const candidate of candidates) {
     const url = buildApiUrl(candidate.prefix, candidate.path);
+    const requestHeaders = candidate.extraHeaders ? { ...headers, ...candidate.extraHeaders } : headers;
     try {
-      const response = await fetchWithRetry(url, { headers }, 1); // single attempt — a 404/401 here isn't worth retrying
+      const response = await fetchWithRetry(url, { headers: requestHeaders }, 1); // single attempt — a 404/401 here isn't worth retrying
       const status = response.status;
       const bodyText = await response.text();
       let bodyParsed = null;
