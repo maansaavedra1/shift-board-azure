@@ -1,7 +1,7 @@
 const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
-const { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, findEmployeeByName, getRawScheduleForEmployee } = require('./sprout');
+const { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, findEmployeeByName, getRawScheduleForEmployee, probeLeaveEndpoints } = require('./sprout');
 const configStore = require('./config-store');
 const authStore = require('./auth-store');
 
@@ -315,6 +315,24 @@ app.get('/api/debug/raw-schedule', async (req, res) => {
     return res.json({ ok: true, ...result });
   } catch (err) {
     console.error('Raw schedule fetch failed:', err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// One-time diagnostic: tries several plausible leave-related endpoints
+// directly, to check whether any exposes data (like an approval date)
+// not present in the Schedules response already in use. Query with
+// ?systemId=<id>.
+app.get('/api/debug/probe-leave-endpoints', async (req, res) => {
+  try {
+    const systemId = parseInt(req.query.systemId, 10);
+    if (!systemId) {
+      return res.status(400).json({ ok: false, error: 'Provide ?systemId=<id>.' });
+    }
+    const results = await probeLeaveEndpoints(systemId);
+    return res.json({ ok: true, results });
+  } catch (err) {
+    console.error('Leave endpoint probe failed:', err.message);
     return res.status(500).json({ ok: false, error: err.message });
   }
 });

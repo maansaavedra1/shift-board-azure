@@ -1084,4 +1084,44 @@ async function getRawScheduleForEmployee(employeeId, windowDaysPast, windowDaysF
   };
 }
 
-module.exports = { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, findEmployeeByName, getRawScheduleForEmployee };
+// One-time diagnostic: probes several plausible leave-related endpoints
+// directly, to check whether any of them expose data (like an approval
+// date) that isn't present in the Schedules response already being used.
+// Follows the same standard set earlier in this project for
+// ScheduleAdjustments and Leaves/SearchCriteria — don't assume an
+// endpoint exists or is reachable just because it's a plausible name;
+// try it directly and report exactly what comes back.
+async function probeLeaveEndpoints(employeeId) {
+  const headers = await sproutHeaders();
+  const now = new Date();
+  const past = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const dateFromISO = `${formatDateKey(past)}T00:00:00`;
+  const dateToISO = `${formatDateKey(now)}T23:59:59`;
+
+  // Candidates under the same host/prefix Schedules already uses
+  // successfully — the most likely place, if anything exists here at all.
+  const candidates = [
+    { name: 'Leaves (list, no SearchCriteria)', path: `/api/v1/Leaves?DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}&EmployeeId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
+    { name: 'LeaveApplications', path: `/api/v1/LeaveApplications?DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}&EmployeeId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
+    { name: 'Leaves/{employeeId}', path: `/api/v1/Leaves/${encodeURIComponent(employeeId)}?DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}` },
+    { name: 'EmployeeLeaves', path: `/api/v1/EmployeeLeaves?EmployeeId=${encodeURIComponent(employeeId)}&DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}` }
+  ];
+
+  const results = [];
+  for (const candidate of candidates) {
+    const url = buildApiUrl('timeattendance', candidate.path);
+    try {
+      const response = await fetchWithRetry(url, { headers }, 1); // single attempt — a 404/401 here isn't worth retrying
+      const status = response.status;
+      const bodyText = await response.text();
+      let bodyParsed = null;
+      try { bodyParsed = JSON.parse(bodyText); } catch (e) { /* keep raw text below */ }
+      results.push({ name: candidate.name, url, httpStatus: status, body: bodyParsed || bodyText.slice(0, 500) });
+    } catch (err) {
+      results.push({ name: candidate.name, url, error: err.message });
+    }
+  }
+  return results;
+}
+
+module.exports = { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, findEmployeeByName, getRawScheduleForEmployee, probeLeaveEndpoints };
