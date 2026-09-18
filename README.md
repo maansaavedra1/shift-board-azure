@@ -681,6 +681,38 @@ test: three different employees sharing the same date, the corrected
 version now picks the exact record actually belonging to the requested
 employee, not the first or last one found.
 
+### Log-matching window was too narrow, using a made-up number
+
+A real production case, found the same day the client reported it: an
+employee (Normal Shift schedule) genuinely clocked in and out —
+confirmed directly against Sprout's raw attendance logs — but the
+dashboard showed her as having a logout with no matching login. Her
+actual login was 4 hours 24 minutes before her shift started; the
+matching window was a flat 4 hours in both directions, a number picked
+for being "generous" rather than sourced from anything real. She missed
+it by 24 minutes.
+
+Fixed properly rather than just widening the same flat number: Sprout
+has its own configured attendance thresholds, confirmed directly from
+the client's real settings — genuinely asymmetric (pre-shift and
+post-shift are different), and genuinely different by schedule type
+(Normal Shift: 6h pre / 8h post; Flexi Schedule Per Day: 6h pre / 12h
+post). `findShiftLogTimes` now takes separate pre/post grace periods
+instead of one symmetric number, and the correct pair is selected per
+employee based on their actual `scheduleType` from Sprout. "Normal
+Shift" is the only value confirmed seen in real data so far; anything
+else (including an actual Flexi employee, not yet seen directly, or any
+unrecognized value) defaults to the wider Flexi thresholds — a wider
+window risks catching a stray punch from an adjacent shift, but a
+narrower one risks the exact bug this fixes.
+
+Confirmed with the real reported case (now correctly shows On Time, both
+punches captured), a control case confirming the window still has real
+limits (a punch 10 hours early, genuinely unrelated, is still correctly
+excluded), and a Flexi-type case confirming its wider post-shift
+threshold correctly captures a logout that Normal Shift's narrower one
+would have missed.
+
 ### Detail column was silently clipping longer entries
 
 A real, screenshotted case: once a leave row started carrying the AM/PM

@@ -531,11 +531,12 @@ function classifyEmployeeForDay(emp, dayContext) {
   const yesterdayWasOvernightIntoToday = !!(yesterdayBoundaries && yesterdayBoundaries.end && formatDateKey(yesterdayBoundaries.end) === dayContext.dayKey);
 
   const employeeLogs = (dayContext.logsByBioId && dayContext.logsByBioId[bioId]) || [];
+  const thresholds = getAttendanceThresholds(work.scheduleType);
   // On a genuine rest day there's no shift window to search against —
   // fall back to a plain same-calendar-day match, same as the original
   // behavior, just so a rest-day worker's logs still show if present.
   const { inTime, outTime } = (todayBoundaries && !isRestDay)
-    ? findShiftLogTimes(employeeLogs, todayBoundaries.start, todayBoundaries.end, yesterdayWasOvernightIntoToday ? yesterdayBoundaries.end : null)
+    ? findShiftLogTimes(employeeLogs, todayBoundaries.start, todayBoundaries.end, yesterdayWasOvernightIntoToday ? yesterdayBoundaries.end : null, thresholds.pre, thresholds.post)
     : (() => {
         let firstIn = null;
         let lastOut = null;
@@ -877,18 +878,22 @@ function getShiftBoundariesForDay(systemId, someDayKey, schedule) {
 // itself overnight and ends today) is used to exclude a checkout that
 // actually belongs to THAT earlier shift — otherwise it could get
 // double-counted as this shift's own checkout too.
-function findShiftLogTimes(employeeLogs, shiftStart, shiftEnd, previousDayEnd) {
+function findShiftLogTimes(employeeLogs, shiftStart, shiftEnd, previousDayEnd, preGraceMs, postGraceMs) {
   if (!employeeLogs || employeeLogs.length === 0) return { inTime: null, outTime: null };
 
   // Search window: from a bit before shift start (covers someone
   // clocking in early) to a generous margin after shift end (covers an
   // overnight shift's checkout the next morning, or someone staying
-  // late). 4 hours each direction comfortably covers real early-arrival
-  // and late-checkout cases without reaching into a genuinely separate
-  // later shift.
-  const GRACE_MS = 4 * 60 * 60 * 1000;
-  const windowStart = shiftStart ? new Date(shiftStart.getTime() - GRACE_MS) : null;
-  const windowEnd = shiftEnd ? new Date(shiftEnd.getTime() + GRACE_MS) : null;
+  // late). Pre/post grace periods are no longer symmetric — they come
+  // from Sprout's own configured thresholds, which differ by schedule
+  // type and are asymmetric even within one type. Confirmed via a real
+  // production case: Normal Shift's threshold is 6h before / 8h after,
+  // and a real employee's 4h24m-early login was being missed entirely
+  // under the previous flat 4-hour-both-directions window, showing as
+  // "logout with no matching login" despite both punches genuinely
+  // existing in Sprout's data.
+  const windowStart = shiftStart ? new Date(shiftStart.getTime() - preGraceMs) : null;
+  const windowEnd = shiftEnd ? new Date(shiftEnd.getTime() + postGraceMs) : null;
 
   let inTime = null;
   let outTime = null;
@@ -902,7 +907,7 @@ function findShiftLogTimes(employeeLogs, shiftStart, shiftEnd, previousDayEnd) {
     // from this shift's own matching so it isn't misread as "this
     // shift's checkout" or, worse, as a sign this shift itself is broken.
     if (previousDayEnd && log.isOut) {
-      const previousGraceEnd = new Date(previousDayEnd.getTime() + GRACE_MS);
+      const previousGraceEnd = new Date(previousDayEnd.getTime() + postGraceMs);
       if (log.time <= previousGraceEnd) return;
     }
 
@@ -912,6 +917,25 @@ function findShiftLogTimes(employeeLogs, shiftStart, shiftEnd, previousDayEnd) {
 
   return { inTime, outTime };
 }
+
+// Sprout's own configured attendance thresholds (confirmed directly from
+// the client's Sprout settings, not assumed) — genuinely asymmetric, and
+// genuinely different by schedule type. "Normal Shift" is the only
+// scheduleType string confirmed seen in real data so far; anything else
+// (including an actual "Flexi Schedule Per Day" employee, not yet seen
+// in real data, or any unrecognized value) defaults to the wider Flexi
+// thresholds — a wider window risks catching a stray punch from an
+// adjacent shift, but a narrower one risks the exact bug this was built
+// to fix: a real, legitimate punch just outside the window being
+// silently treated as missing.
+const ATTENDANCE_THRESHOLDS_MS = {
+  'Normal Shift': { pre: 6 * 60 * 60 * 1000, post: 8 * 60 * 60 * 1000 },
+  DEFAULT: { pre: 6 * 60 * 60 * 1000, post: 12 * 60 * 60 * 1000 }
+};
+function getAttendanceThresholds(scheduleTypeLabel) {
+  return ATTENDANCE_THRESHOLDS_MS[scheduleTypeLabel] || ATTENDANCE_THRESHOLDS_MS.DEFAULT;
+}
+
 
 async function computeTodayReport() {
   const now = new Date();
