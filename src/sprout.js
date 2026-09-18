@@ -1128,7 +1128,27 @@ async function probeLeaveEndpoints(employeeId) {
     // action, not strictly a time-and-attendance one.
     { name: 'MyRequest (hrservice prefix)', prefix: 'hrservice', path: `/api/v1/MyRequest?${dateParams}` },
     { name: 'MyRequests (hrservice prefix)', prefix: 'hrservice', path: `/api/v1/MyRequests?${dateParams}` },
-    { name: 'Leaves (hrservice prefix)', prefix: 'hrservice', path: `/api/v1/Leaves?${dateParams}` }
+    { name: 'Leaves (hrservice prefix)', prefix: 'hrservice', path: `/api/v1/Leaves?${dateParams}` },
+    // Found in Sprout's own real, documented API reference (confirmed
+    // directly, not guessed): a genuine "Approvals" endpoint exists,
+    // whose example response includes dateFiled, type, reason,
+    // employeeId and requestId — and its status enum comment
+    // ("Approved = 4") exactly matches a comment already in this
+    // codebase. Critically, its path prefix is "timeandattendance"
+    // (with "and") — different from "timeattendance" (no "and"), which
+    // is the only prefix this app has ever used or tested. That
+    // spelling difference is the most likely reason every earlier probe
+    // attempt failed regardless of resource name. Takes an ApproverId,
+    // not an EmployeeId — "pending applications for an approver" is a
+    // different shape than "an employee's own history" — so a real
+    // approver's ID is needed to test this meaningfully.
+    { name: 'Approvals (timeandattendance prefix, by ApproverId)', prefix: 'timeandattendance', path: `/api/v1/Approvals?ApproverId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
+    // Same corrected prefix, tried against the resource names already
+    // ruled out under the old spelling — worth re-checking now that the
+    // real prefix is known.
+    { name: 'Leaves (timeandattendance prefix)', prefix: 'timeandattendance', path: `/api/v1/Leaves?${dateParams}` },
+    { name: 'MyRequest (timeandattendance prefix)', prefix: 'timeandattendance', path: `/api/v1/MyRequest?${dateParams}` },
+    { name: 'MyRequests (timeandattendance prefix)', prefix: 'timeandattendance', path: `/api/v1/MyRequests?${dateParams}` }
   ];
 
   const results = [];
