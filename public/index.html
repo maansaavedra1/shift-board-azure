@@ -370,7 +370,13 @@
      container's overflow:hidden, this cut text off with no visual
      indication anything was missing. Wraps naturally now, same as
      every other column. */
-  td[data-label="Detail"] { white-space: normal; }
+  /* Kept on one line where possible — a shorter, smaller-font line reads
+     faster than a wrapped one, especially in a table someone's scanning
+     down. text-overflow:ellipsis is the safety net: if a genuinely long
+     entry still doesn't fit, it truncates visibly with "…" rather than
+     the previous behavior, where excess text was silently clipped with
+     no indication anything was missing. */
+  td[data-label="Detail"] { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; max-width: 1px; width: 100%; }
 
   #scrollTopBtn {
     position: fixed;

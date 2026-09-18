@@ -623,6 +623,22 @@ Both need a concrete real example (a specific employee, an approximate
 time) before they can be investigated properly; sitting behind
 "needs more information," not dismissed.
 
+### Detail column was silently clipping longer entries
+
+A real, screenshotted case: once a leave row started carrying the AM/PM
+label, leave type, and an anomaly log together in one cell, the combined
+text genuinely no longer fit — and `white-space: nowrap` combined with
+the table's `overflow: hidden` was cutting it off completely silently,
+with no visual indication anything was missing. First fix (allowing the
+cell to wrap) worked but produced tall, awkward multi-line rows in a
+table meant to be scanned quickly. Settled on: one line, a smaller font
+(12.5px) to fit more before truncating, and `text-overflow: ellipsis` as
+a visible safety net — so a genuinely long entry now truncates with "…"
+instead of vanishing invisibly. Confirmed against the real reported case
+and an intentionally extreme one; both now compress to one line, with
+the safety net firing visibly on the more extreme case rather than
+silently losing content.
+
 ### Login is required
 
 There's a full System ID + password login system — see the
