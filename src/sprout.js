@@ -1090,6 +1090,31 @@ async function getRawScheduleForEmployee(employeeId, windowDaysPast, windowDaysF
   };
 }
 
+// One-time diagnostic: fetches one employee's raw AttendanceLogs data
+// live, bypassing the cache and classification logic entirely — for
+// seeing the exact real punches when investigating a classification
+// that looks wrong.
+async function getRawAttendanceLogsForEmployee(employeeId, windowDaysPast, windowDaysFuture) {
+  const now = new Date();
+  const rangeStart = new Date(now.getTime() - windowDaysPast * 24 * 60 * 60 * 1000);
+  const rangeEnd = new Date(now.getTime() + windowDaysFuture * 24 * 60 * 60 * 1000);
+  const dateFromISO = `${formatDateKey(rangeStart)}T00:00:00`;
+  const dateToISO = `${formatDateKey(rangeEnd)}T23:59:59`;
+
+  const url = buildApiUrl('timeattendance', `/api/v1/AttendanceLogs?DateFrom=${encodeURIComponent(dateFromISO)}&DateTo=${encodeURIComponent(dateToISO)}&EmployeeId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100`);
+  const response = await fetchWithRetry(url, { headers: await sproutHeaders() });
+  const status = response.status;
+  const body = await response.text();
+  let parsed = null;
+  try { parsed = JSON.parse(body); } catch (e) { /* leave as raw text below if not valid JSON */ }
+
+  return {
+    requestedUrl: url,
+    httpStatus: status,
+    rawResponse: parsed || body
+  };
+}
+
 // One-time diagnostic: probes several plausible leave-related endpoints
 // directly, to check whether any of them expose data (like an approval
 // date) that isn't present in the Schedules response already being used.
@@ -1438,4 +1463,4 @@ async function getLeaveApprovalDate(employeeId, dayKey) {
   };
 }
 
-module.exports = { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, findEmployeeByName, getRawScheduleForEmployee, probeLeaveEndpoints, getLeaveApprovalDate };
+module.exports = { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, findEmployeeByName, getRawScheduleForEmployee, probeLeaveEndpoints, getLeaveApprovalDate, getRawAttendanceLogsForEmployee };

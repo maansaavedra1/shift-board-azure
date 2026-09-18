@@ -1,7 +1,7 @@
 const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
-const { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, probeLeaveEndpoints, getLeaveApprovalDate, findEmployeeByName, getRawScheduleForEmployee } = require('./sprout');
+const { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, probeLeaveEndpoints, getLeaveApprovalDate, findEmployeeByName, getRawScheduleForEmployee, getRawAttendanceLogsForEmployee } = require('./sprout');
 const configStore = require('./config-store');
 const authStore = require('./auth-store');
 
@@ -319,6 +319,25 @@ app.get('/api/debug/raw-schedule', async (req, res) => {
     return res.json({ ok: true, ...result });
   } catch (err) {
     console.error('Raw schedule fetch failed:', err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// One-time diagnostic: fetches one employee's raw AttendanceLogs data
+// live, bypassing the cache and classification logic entirely. Query
+// with ?systemId=<id>, optionally &past=<days>&future=<days>.
+app.get('/api/debug/raw-attendance-logs', async (req, res) => {
+  try {
+    const systemId = parseInt(req.query.systemId, 10);
+    if (!systemId) {
+      return res.status(400).json({ ok: false, error: 'Provide ?systemId=<id>.' });
+    }
+    const past = parseInt(req.query.past, 10) || 2;
+    const future = parseInt(req.query.future, 10) || 1;
+    const result = await getRawAttendanceLogsForEmployee(systemId, past, future);
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('Raw attendance logs fetch failed:', err.message);
     return res.status(500).json({ ok: false, error: err.message });
   }
 });
