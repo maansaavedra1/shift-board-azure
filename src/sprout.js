@@ -1150,6 +1150,14 @@ async function probeLeaveEndpoints(employeeId) {
     // Added here only, not globally, so this test can't affect any other,
     // already-working call.
     { name: 'Approvals (with TenantCode header)', prefix: 'timeandattendance', path: `/api/v1/Approvals?ApproverId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100`, extraHeaders: { TenantCode: process.env.SPROUT_CLIENT_ID } },
+    // A separate curl example, pasted directly from Sprout's docs,
+    // shows Approvals under "timeattendance" (no "and") — the exact
+    // same prefix Schedules and AttendanceLogs already use successfully
+    // in this app — with no TenantCode header at all, unlike the other
+    // example above. Genuinely different from what was tested so far,
+    // and worth checking directly rather than assuming either example
+    // is the authoritative one.
+    { name: 'Approvals (timeattendance prefix, no "and", no TenantCode)', prefix: 'timeattendance', path: `/api/v1/Approvals?ApproverId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
     // Same corrected prefix, tried against the resource names already
     // ruled out under the old spelling — worth re-checking now that the
     // real prefix is known.
