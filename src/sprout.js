@@ -1173,6 +1173,20 @@ async function probeLeaveEndpoints(employeeId) {
     // Also worth re-checking Requests specifically under the now-confirmed
     // correct prefix — it was tried before, but only under the wrong one.
     { name: 'Requests (confirmed-correct prefix)', prefix: 'timeattendance', path: `/api/v1/Requests?EmployeeId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
+    // Genuinely different from the confirmed-blocked Leaves/SearchCriteria
+    // (that one is POST, on the api.sprout.ph host, and 401s with an
+    // issuer mismatch). This is GET, under the same timeattendance
+    // prefix that Approvals just confirmed works, and takes a
+    // SearchCriteriaId rather than a search body — closer to the
+    // "retrieve cached results by an id" pattern ArchivedAttendanceLogs/
+    // SearchCriteria used in the docs already shared. No real
+    // SearchCriteriaId is known, so this uses employeeId as a stand-in
+    // just to see how the endpoint responds to *some* value — a 404
+    // here would mean the route itself doesn't exist under this prefix;
+    // a different error (e.g. "criteria not found") would mean it does,
+    // and a real id would need to come from wherever this criteria gets
+    // created in the first place.
+    { name: 'Leaves/SearchCriteria (timeattendance prefix, GET)', prefix: 'timeattendance', path: `/api/v1/Leaves/SearchCriteria?SearchCriteriaId=${encodeURIComponent(employeeId)}` },
     // Same corrected prefix, tried against the resource names already
     // ruled out under the old spelling — worth re-checking now that the
     // real prefix is known.
