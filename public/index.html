@@ -364,7 +364,13 @@
   .compact .emp-name { font-size: 12px; }
   .emp-name { font-family: var(--font-display); font-weight: 600; font-size: 14px; }
   .mono-cell { color: var(--text-muted); }
-  td[data-label="Detail"] { white-space: nowrap; }
+  /* Previously forced onto one line, which quietly clipped content once
+     Detail entries got longer (leave type, AM/PM, shift hours, an
+     anomaly log all in the same cell) — combined with the group
+     container's overflow:hidden, this cut text off with no visual
+     indication anything was missing. Wraps naturally now, same as
+     every other column. */
+  td[data-label="Detail"] { white-space: normal; }
 
   #scrollTopBtn {
     position: fixed;
