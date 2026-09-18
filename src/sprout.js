@@ -1188,6 +1188,14 @@ async function probeLeaveEndpoints(employeeId) {
     // directly on Leaves with a real, known request id (2227, Sarah's
     // confirmed half-day leave from sandbox) rather than an employeeId.
     { name: 'Leaves/:id (sandbox, real request id)', prefix: 'timeattendance', path: `/api/v1/Leaves/2227`, extraHeaders: { UserId: process.env.SPROUT_USER_ID || '' } },
+    // Genuinely different from the above — "Leave" singular, not
+    // "Leaves" plural. The earlier 404 may simply have been the wrong
+    // resource name, not proof no detail-by-id endpoint exists. This
+    // matches the exact pattern that worked for
+    // CertificateOfAttendances/:id, just with the correct name this
+    // time. Same real request id (2227, Sarah's confirmed half-day
+    // leave) so the result is directly comparable.
+    { name: 'Leave/:id singular (sandbox, real request id)', prefix: 'timeattendance', path: `/api/v1/Leave/2227`, extraHeaders: { UserId: process.env.SPROUT_USER_ID || '' } },
     // Same pattern, but for CertificateOfAttendances specifically, as
     // asked — a different request type (COA), tested the same way to
     // see if by-id detail views work generally on this API.
