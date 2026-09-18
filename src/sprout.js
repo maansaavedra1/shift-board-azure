@@ -1158,6 +1158,21 @@ async function probeLeaveEndpoints(employeeId) {
     // and worth checking directly rather than assuming either example
     // is the authoritative one.
     { name: 'Approvals (timeattendance prefix, no "and", no TenantCode)', prefix: 'timeattendance', path: `/api/v1/Approvals?ApproverId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
+    // Confirmed above: this exact prefix/header combo genuinely works,
+    // and the real response only ever shows pending items (no approval
+    // date). Trying variations under the same confirmed-working setup —
+    // an undocumented status filter on the same endpoint, and a few
+    // plausible names for a separate "already processed" resource —
+    // since "pending" and "history" are commonly split into different
+    // endpoints or views in systems built around an approval queue.
+    { name: 'Approvals with StatusId=4 (Approved)', prefix: 'timeattendance', path: `/api/v1/Approvals?ApproverId=${encodeURIComponent(employeeId)}&StatusId=4&PageNumber=1&RowsPerPage=100` },
+    { name: 'Approvals with RequestStatusId=4 (Approved)', prefix: 'timeattendance', path: `/api/v1/Approvals?ApproverId=${encodeURIComponent(employeeId)}&RequestStatusId=4&PageNumber=1&RowsPerPage=100` },
+    { name: 'ApprovedRequests', prefix: 'timeattendance', path: `/api/v1/ApprovedRequests?ApproverId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
+    { name: 'Approvals/History', prefix: 'timeattendance', path: `/api/v1/Approvals/History?ApproverId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
+    { name: 'RequestHistory', prefix: 'timeattendance', path: `/api/v1/RequestHistory?ApproverId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
+    // Also worth re-checking Requests specifically under the now-confirmed
+    // correct prefix — it was tried before, but only under the wrong one.
+    { name: 'Requests (confirmed-correct prefix)', prefix: 'timeattendance', path: `/api/v1/Requests?EmployeeId=${encodeURIComponent(employeeId)}&PageNumber=1&RowsPerPage=100` },
     // Same corrected prefix, tried against the resource names already
     // ruled out under the old spelling — worth re-checking now that the
     // real prefix is known.
