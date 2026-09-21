@@ -742,7 +742,23 @@ function parseManilaDateTime(naiveDateTimeStr) {
 }
 
 function manilaTimeOnDay(dayKey, hhmmStr) {
-  return parseManilaDateTime(`${dayKey}T${hhmmStr}:00`);
+  // Sprout's default weekly schedule (workSchedule.mondayFrom, etc.) comes
+  // back as a full "HH:MM:SS" string (confirmed via real data — e.g.
+  // "09:00:00"), not the bare "HH:MM" this function previously assumed.
+  // Blindly appending ":00" to an already-HH:MM:SS value built a
+  // malformed string ("...T09:00:00:00+08:00"), which silently produced
+  // an Invalid Date. The existing isNaN guard in getShiftBoundariesForDay
+  // catches that and nulls out the individual field — but a null-but-
+  // truthy {start:null,end:null} boundary object then left the
+  // log-matching window in findShiftLogTimes completely unbounded,
+  // silently attributing an unrelated punch from ANY day in this
+  // employee's history to today, or misclassifying a genuinely on-time
+  // employee as Late with no punches at all. Only append ":00" when the
+  // value doesn't already carry seconds, so both formats parse correctly
+  // regardless of which one Sprout actually sends for a given field.
+  const hasSeconds = /^\d{1,2}:\d{2}:\d{2}$/.test(hhmmStr);
+  const normalized = hasSeconds ? hhmmStr : `${hhmmStr}:00`;
+  return parseManilaDateTime(`${dayKey}T${normalized}`);
 }
 
 // Derives day-of-week purely from the calendar date string (already
