@@ -322,6 +322,9 @@
 
   .group-body { border-top: 1px solid var(--border); }
   .group.collapsed .group-body { display: none; }
+  .shift-filter-row { padding: 10px 16px; background: var(--panel-2); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
+  .shift-filter-row label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .shift-filter-select { background: var(--panel); border: 1px solid var(--border); color: var(--text); font-family: var(--font-mono); font-size: 12px; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
   .group-empty { padding: 14px 18px; color: var(--text-dim); font-size: 12px; }
 
   table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
@@ -1164,6 +1167,21 @@
     return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Manila' }).replace(' ', '');
   }
 
+  // Derives a stable label for an employee's scheduled shift, e.g.
+  // "9:00PM–6:00AM", from the same scheduledShiftStart/scheduledShiftEnd
+  // already shown in the Detail column for Late (Shift Ongoing). Used to
+  // group and filter that category by actual shift time, per client
+  // feedback asking specifically for filter-by-shift-time rather than the
+  // department-based alternative. Returns null when either boundary is
+  // missing, so callers can fall back to an "Unknown shift" bucket rather
+  // than crashing or silently mislabeling.
+  function shiftSignatureFor(e) {
+    var startDisp = formatLogTime(e.scheduledShiftStart);
+    var endDisp = formatLogTime(e.scheduledShiftEnd);
+    if (!startDisp || !endDisp) return null;
+    return startDisp + '\u2013' + endDisp;
+  }
+
   function logNote(e) {
     // Shows actual times, not just a yes/no flag — a real, common
     // scenario is someone working part of a shift before an emergency
@@ -1344,8 +1362,33 @@
       if (isEmpty) {
         body.innerHTML = '<div class="group-empty">No one in this category.</div>';
       } else {
+        // Shift-time filter — only for Late (Shift Ongoing), only shown
+        // when there's actually more than one distinct shift to choose
+        // between. Built fresh from whatever's real in this specific
+        // list/day, not a fixed set that could drift out of sync with
+        // actual schedules.
+        var shiftFilterHtml = '';
+        if (status === 'late') {
+          var signatures = list.map(function (e) { return shiftSignatureFor(e) || 'Unknown shift'; });
+          var distinctSignatures = signatures.filter(function (sig, i) { return signatures.indexOf(sig) === i; });
+          if (distinctSignatures.length > 1) {
+            var optionsHtml = '<option value="__all__">All shifts</option>' +
+              distinctSignatures.map(function (sig) {
+                return '<option value="' + escapeHtml(sig) + '">' + escapeHtml(sig) + '</option>';
+              }).join('');
+            shiftFilterHtml =
+              '<div class="shift-filter-row">' +
+                '<label>Filter by shift: ' +
+                  '<select class="shift-filter-select">' + optionsHtml + '</select>' +
+                '</label>' +
+              '</div>';
+          }
+        }
+        if (shiftFilterHtml) body.innerHTML = shiftFilterHtml;
+
         var rowsHtml = list.map(function (e) {
-          return '<tr>' +
+          var shiftAttr = status === 'late' ? ' data-shift-signature="' + escapeHtml(shiftSignatureFor(e) || 'Unknown shift') + '"' : '';
+          return '<tr' + shiftAttr + '>' +
             '<td class="emp-name" data-label="Employee">' + escapeHtml(e.name) + '</td>' +
             '<td class="mono-cell" data-label="Department">' + escapeHtml(e.department || '—') + '</td>' +
             '<td class="mono-cell" data-label="Supervisor">' + escapeHtml(e.supervisor || '—') + '</td>' +
@@ -1359,6 +1402,21 @@
           '<thead><tr><th>Employee</th><th>Department</th><th>Supervisor</th><th>Detail</th></tr></thead>' +
           '<tbody>' + rowsHtml + '</tbody>';
         body.appendChild(table);
+
+        if (shiftFilterHtml) {
+          var shiftSelect = body.querySelector('.shift-filter-select');
+          var tbodyEl = table.querySelector('tbody');
+          shiftSelect.addEventListener('change', function () {
+            var chosen = shiftSelect.value;
+            tbodyEl.querySelectorAll('tr').forEach(function (row) {
+              var matches = chosen === '__all__' || row.getAttribute('data-shift-signature') === chosen;
+              row.style.display = matches ? '' : 'none';
+            });
+          });
+          // Prevent the header's collapse/expand toggle from firing when
+          // interacting with the filter itself.
+          shiftSelect.addEventListener('click', function (evt) { evt.stopPropagation(); });
+        }
       }
 
       groupEl.appendChild(header);

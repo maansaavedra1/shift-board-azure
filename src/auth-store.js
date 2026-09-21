@@ -103,6 +103,19 @@ function register(systemId, password, employees) {
     throw new Error('An account for this System ID already exists. Use the login screen instead.');
   }
 
+  // A registration for an allowlisted System ID succeeding with ZERO other
+  // accounts on file is the exact signature of the persistent-storage
+  // wipe (see AZURE_DEPLOYMENT.md Step 4/6 and the account-wipe incident
+  // write-up) — a brand new deployment would also hit this once, but a
+  // deployment that's been live long enough to have an allowlist and real
+  // admins should not be registering into an empty store. Logged loudly
+  // (not just a normal info line) so it shows up in the Azure Log Stream
+  // on its own, without anyone needing to go looking for it.
+  const accountCountBeforeThisOne = Object.keys(accounts).length;
+  if (accountCountBeforeThisOne === 0) {
+    console.error(`⚠️  ACCOUNT STORE APPEARS EMPTY — registering "${systemId}" as if this were the very first admin ever. If this deployment has had admins before, this almost certainly means /app/data is not on a persistent volume and was just wiped (container restart/redeploy/scale event). See AZURE_DEPLOYMENT.md Step 4/6. If this really is the first-ever registration on a fresh deployment, this warning is expected and can be ignored.`);
+  }
+
   const passwordHash = bcrypt.hashSync(password, 10);
   accounts[systemId] = { passwordHash, registeredAt: new Date().toISOString() };
   saveAccounts(accounts);
