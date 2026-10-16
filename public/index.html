@@ -1016,12 +1016,11 @@
     block.classList.add('preliminary');
     var progress = '';
     if (cache.employeesTotal) {
-      progress = ' (' + (cache.employeesProcessed || 0) + ' of ' + cache.employeesTotal + ' employees checked)';
+      progress = ' (' + (cache.employeesProcessed || 0) + ' of ' + cache.employeesTotal + ' checked)';
     }
     var gaveUp = autoRefreshDeadline === null && !autoRefreshTimer;
-    note.innerHTML = '<strong>Preliminary</strong>Leave and schedule changes are still loading' + progress + '. '
-      + (gaveUp ? 'Press Refresh to check again.' : 'No need to refresh — these counts update on their own, and refreshing will not make it faster.')
-      + ' Export to Excel unlocks when loading finishes.';
+    note.innerHTML = '<strong>Preliminary</strong>Still loading leave and schedule changes' + progress + '. '
+      + (gaveUp ? 'Press Refresh to check again.' : 'Counts update on their own — no need to refresh. Export unlocks when done.');
     note.classList.add('visible');
   }
 
@@ -1053,7 +1052,7 @@
     }
   }
 
-  function scheduleAdjustmentCacheMessage(cache, autoUpdates) {
+  function scheduleAdjustmentCacheMessage(cache) {
     if (!cache) return null;
     if (cache.lastRefreshedAt) {
       // A cache that completed once used to be treated as permanently
@@ -1075,11 +1074,10 @@
     if (cache.lastError) {
       return 'Schedule adjustments could not load yet (' + cache.lastError + ') — will keep retrying in the background.';
     }
-    // Only the single-day (Today) view re-checks by itself — the multi-day
-    // views are heavier to load, so there the person is asked to refresh.
-    return autoUpdates
-      ? 'Schedule adjustments are still loading for the first time — leave and one-off schedule changes may not show yet, so the counts below are preliminary. No need to refresh: this page updates on its own, and refreshing will not make it load faster. This can take a few minutes for a large employee list.'
-      : 'Schedule adjustments are still loading for the first time — leave and one-off schedule changes may not show yet, so the counts below are preliminary. Please press Refresh in a few minutes, once it has finished loading. Export to Excel unlocks then.';
+    // The single-day (Today) view explains this in its PRELIMINARY note, so
+    // the banner is only used for the multi-day views (which have no note and
+    // do not re-check by themselves).
+    return 'Still loading leave and schedule changes for the first time, so these counts are preliminary. Press Refresh in a few minutes. Export unlocks then.';
   }
 
   // Small, persistent (not just cold-start) note next to "Last updated" —
@@ -1087,8 +1085,9 @@
   // continuous given how long one cycle takes at this employee count),
   // so it's worth always showing when it last actually completed, not
   // just flagging the one-time cold-start wait.
-  function renderScheduleAdjustmentNote(cache) {
+  function renderScheduleAdjustmentNote(cache, quietWhileLoading) {
     var el = document.getElementById('scheduleAdjustmentNote');
+    if (quietWhileLoading && cache && !cache.lastRefreshedAt && !cache.lastError) { el.textContent = ''; el.style.color = ''; el.style.fontWeight = ''; return; }
     if (!cache) { el.textContent = ''; el.style.color = ''; el.style.fontWeight = ''; return; }
     if (cache.lastRefreshedAt) {
       var t = new Date(cache.lastRefreshedAt);
@@ -1758,7 +1757,7 @@
         isPreliminaryNow = isPreliminary(adjCache);
         updateExportButton();
         renderScheduleAdjustmentNote(adjCache);
-        var adjMessage = scheduleAdjustmentCacheMessage(adjCache, false);
+        var adjMessage = scheduleAdjustmentCacheMessage(adjCache);
         if (adjMessage) showInfo(adjMessage);
       } else {
         summaryBlock.style.display = '';
@@ -1775,9 +1774,10 @@
           cancelAutoRefresh();
         }
         renderPreliminaryState(dayCache);
-        renderScheduleAdjustmentNote(data.report.scheduleAdjustmentCache);
-        var adjMsg = scheduleAdjustmentCacheMessage(data.report.scheduleAdjustmentCache, true);
-        if (adjMsg) {
+        renderScheduleAdjustmentNote(data.report.scheduleAdjustmentCache, true);
+        var adjMsg = scheduleAdjustmentCacheMessage(data.report.scheduleAdjustmentCache);
+        var noteCoversIt = isPreliminary(dayCache) && !dayCache.lastError;
+        if (adjMsg && !noteCoversIt) {
           showInfo(adjMsg);
         } else {
           var today = new Date();
