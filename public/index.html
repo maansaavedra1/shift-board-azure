@@ -706,7 +706,7 @@
 
   function exportToExcel() {
     if (isPreliminaryNow) {
-      alert('These counts are still preliminary — the first sync has not finished. Export will be available once loading completes.');
+      alert('The numbers are still updating. Export to Excel will be ready once they finish.');
       return;
     }
     if (lastMultiDayReports) {
@@ -980,7 +980,7 @@
   function updateExportButton() {
     var btn = document.getElementById('exportBtn');
     btn.disabled = isLoadingNow || isPreliminaryNow;
-    btn.title = isPreliminaryNow ? 'Available once the first sync finishes — these counts are still preliminary.' : '';
+    btn.title = isPreliminaryNow ? 'Export to Excel will be ready once the numbers finish updating.' : '';
   }
 
   function isPreliminary(cache) {
@@ -1016,11 +1016,14 @@
     block.classList.add('preliminary');
     var progress = '';
     if (cache.employeesTotal) {
-      progress = ' (' + (cache.employeesProcessed || 0) + ' of ' + cache.employeesTotal + ' checked)';
+      progress = ' (' + (cache.employeesProcessed || 0) + ' of ' + cache.employeesTotal + ' employees done)';
     }
     var gaveUp = autoRefreshDeadline === null && !autoRefreshTimer;
-    note.innerHTML = '<strong>Preliminary</strong>Still loading leave and schedule changes' + progress + '. '
-      + (gaveUp ? 'Press Refresh to check again.' : 'Counts update on their own — no need to refresh. Export unlocks when done.');
+    note.innerHTML = '<strong>Updating</strong>'
+      + (gaveUp
+        ? 'This is taking a little longer than usual. Please press Refresh to check again.'
+        : 'Getting everyone\'s latest leave and schedule updates' + progress + '. Numbers may shift a little — '
+          + 'this page updates by itself, no need to refresh. Export will be ready when done.');
     note.classList.add('visible');
   }
 
@@ -1077,7 +1080,7 @@
     // The single-day (Today) view explains this in its PRELIMINARY note, so
     // the banner is only used for the multi-day views (which have no note and
     // do not re-check by themselves).
-    return 'Still loading leave and schedule changes for the first time, so these counts are preliminary. Press Refresh in a few minutes. Export unlocks then.';
+    return 'We\'re still getting everyone\'s latest leave and schedule updates, so these numbers may change. Please press Refresh in a few minutes — Export to Excel will be ready then.';
   }
 
   // Small, persistent (not just cold-start) note next to "Last updated" —

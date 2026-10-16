@@ -204,10 +204,11 @@ total stays 356. Once loaded, the On Leave list matched Sprout's exactly.
 3. `public/index.html` — while preliminary, the board **re-checks on its own**
    every 15 seconds (single-day view only), stops as soon as the sync finishes,
    and gives up after 6 minutes (then asks the person to press Refresh).
-   In the Today view this is ONE short PRELIMINARY line ("Still loading leave and
-   schedule changes (50 of 355 checked). Counts update on their own — no need to
-   refresh. Export unlocks when done."); the blue banner and the small toolbar
-   status are kept quiet there so the same message isn't shown three times. A
+   In the Today view this is ONE short "Updating" line ("Getting everyone's latest
+   leave and schedule updates (50 of 355 employees done). Numbers may shift a
+   little — this page updates by itself, no need to refresh. Export will be ready
+   when done."); the blue banner and the small toolbar status are kept quiet there
+   so the same message isn't shown three times. A
    real sync error still shows the banner. (Refreshing does not make it faster
    and adds calls.) The multi-day views do not re-check by
    themselves, so their banner asks the person to press Refresh in a few minutes
