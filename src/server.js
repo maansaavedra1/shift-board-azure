@@ -1,7 +1,7 @@
 const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
-const { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, probeLeaveEndpoints, getLeaveApprovalDate, findEmployeeByName, getRawScheduleForEmployee, getRawAttendanceLogsForEmployee } = require('./sprout');
+const { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, probeLeaveEndpoints, getLeaveApprovalDate, findEmployeeByName, getRawScheduleForEmployee, getRawAttendanceLogsForEmployee } = require('./sprout');
 const configStore = require('./config-store');
 const authStore = require('./auth-store');
 
@@ -23,12 +23,8 @@ app.use(express.json());
 app.use(cookieParser());
 
 // Simple, dependency-free rate limiter for the auth routes specifically
-// — register() does a handful of real Sprout API calls before this
-// existed, and login() runs bcrypt (deliberately slow, ~150-300ms per
-// attempt) on Node's single thread with no yielding. Either one looped
-// by a script, or an internet scanner that found the hostname, can
-// amplify into real load on Sprout's rate limit or block the event loop
-// entirely for real users. Keyed by IP (trust proxy above makes req.ip
+// — password guessing against /api/auth/login, looped by a script or an
+// internet scanner that found the hostname, is the thing worth throttling. Keyed by IP (trust proxy above makes req.ip
 // reflect the real client through Azure's edge layer, not the proxy).
 const authAttempts = new Map(); // ip -> { count, windowStartedAt }
 const AUTH_RATE_LIMIT_MAX = 10;
@@ -107,7 +103,7 @@ setInterval(() => {
 
 // Serve the dashboard (index.html) as static files from the same container.
 // Deliberately NOT behind requireSession — the page shell (which contains
-// the login/register form) has to be reachable before anyone can log in.
+// the login form) has to be reachable before anyone can log in.
 // Every actual piece of data lives behind the protected API routes below.
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
@@ -133,51 +129,6 @@ app.get('/api/auth/session', (req, res) => {
   res.json({ ok: true, loggedIn: true, systemId: session.systemId });
 });
 
-app.post('/api/auth/register', async (req, res) => {
-  const { systemId, password } = req.body || {};
-  const genericError = 'Registration failed. Check your System ID, or contact your administrator.';
-  try {
-    // Checked here, before anything else — a cheap, local, in-memory
-    // check that costs nothing, deliberately ahead of the expensive
-    // Sprout fetch below. Without this, any input (a scanner, a typo, a
-    // scripted loop) triggers a handful of real Sprout API calls before
-    // ever getting validated — amplifying junk traffic into load on
-    // Sprout's own rate limit, on top of the background sync already
-    // running continuously.
-    const trimmedId = String(systemId || '').trim();
-    if (!trimmedId || !authStore.getAllowlist().includes(trimmedId)) {
-      return res.status(400).json({ ok: false, error: genericError });
-    }
-    // Checked here too, before the Sprout fetch — an attempt against an
-    // already-claimed ID can never succeed (register() rejects it
-    // internally), but without this check that rejection only happens
-    // *after* a full paginated employee fetch (four live Sprout calls at
-    // ~359 employees) has already run. The allowlist check above closes
-    // most of the original amplification; this closes the specific gap
-    // where a known, already-registered ID still costs a full fetch on
-    // every repeated attempt. Same generic error either way, so this
-    // still reveals nothing about which IDs exist.
-    if (authStore.accountExists(trimmedId)) {
-      return res.status(400).json({ ok: false, error: genericError });
-    }
-    const employees = await getEmployees();
-    authStore.register(systemId, password, employees);
-    setSessionCookie(res, trimmedId); // auto-login right after registering
-    res.json({ ok: true });
-  } catch (err) {
-    // Deliberately generic, not err.message — the previous version
-    // returned three distinct, verbatim error strings (not on the
-    // allowlist / doesn't match a Sprout employee / already registered),
-    // which lets anyone walk the numeric System ID space and learn
-    // exactly which IDs are allowlisted-but-unregistered — each one a
-    // free account waiting to be claimed. err.message could also
-    // surface a raw Sprout response body in some failure paths, which
-    // has no business reaching an unauthenticated caller either.
-    console.error('Registration failed:', err.message);
-    res.status(400).json({ ok: false, error: genericError });
-  }
-});
-
 app.post('/api/auth/login', async (req, res) => {
   const { systemId, password } = req.body || {};
   try {
@@ -187,11 +138,8 @@ app.post('/api/auth/login', async (req, res) => {
     setSessionCookie(res, String(systemId).trim());
     res.json({ ok: true });
   } catch (err) {
-    // Catches a corrupt accounts file (loadAccounts now throws on
-    // unparseable JSON rather than silently treating it as "no
-    // accounts") — without this try/catch, that throw would surface as
-    // an unhandled promise rejection from this async handler, since
-    // verifyLogin is itself async now (see its own comment for why).
+    // verifyLogin is async, so a throw would otherwise surface as an
+    // unhandled promise rejection from this async handler.
     console.error('Login failed:', err.message);
     res.status(500).json({ ok: false, error: 'Login is temporarily unavailable. Please try again shortly.' });
   }
@@ -204,24 +152,6 @@ app.post('/api/auth/logout', (req, res) => {
 
 // Everything from here down requires a valid, logged-in session.
 app.use('/api', authStore.requireSession);
-
-// Admin-assisted password reset. Requires being logged in as SOME admin
-// already (req.systemId is set by requireSession above) — with only a
-// handful of admins total, any one of them vouching for a reset (by
-// already having a valid session) is the actual security model here.
-// See auth-store.js's resetAccount() for the full reasoning.
-app.post('/api/auth/reset-account', (req, res) => {
-  const { systemId } = req.body || {};
-  if (!systemId) {
-    return res.status(400).json({ ok: false, error: 'System ID is required.' });
-  }
-  try {
-    authStore.resetAccount(systemId);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(400).json({ ok: false, error: err.message });
-  }
-});
 
 // Lets the dashboard (or a curious dev) check on the background schedule
 // adjustment cache directly, without needing a full report fetch.
@@ -415,5 +345,6 @@ app.listen(PORT, () => {
   console.log(`Health check: http://localhost:${PORT}/health`);
   console.log(`Report endpoint (login required): http://localhost:${PORT}/api/shift-board`);
   console.log(`Settings endpoint (login required): http://localhost:${PORT}/api/settings`);
-  console.log(`Admin allowlist: ${authStore.getAllowlist().length ? authStore.getAllowlist().join(', ') : '(none set — nobody can register yet; set ADMIN_ALLOWLIST)'}`);
+  const adminCount = authStore.getAllowlist().length;
+  console.log(adminCount ? `Admin credentials configured: ${adminCount}` : '(no admin credentials set — nobody can log in; set ADMIN_1_ID and ADMIN_1_PASSWORD)');
 });

@@ -14,6 +14,16 @@ services:
       SPROUT_CLIENT_SECRET: ${SPROUT_CLIENT_SECRET}
       SPROUT_SUBSCRIPTION_KEY: ${SPROUT_SUBSCRIPTION_KEY}
       SPROUT_USER_ID: ${SPROUT_USER_ID}
+      # Admin logins — see .env.example. Compose can only pass variables by
+      # name, so add more ADMIN_<n>_* lines here if you need more than
+      # three admins. Blank pairs are ignored by the app.
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      ADMIN_1_ID: ${ADMIN_1_ID:-}
+      ADMIN_1_PASSWORD: ${ADMIN_1_PASSWORD:-}
+      ADMIN_2_ID: ${ADMIN_2_ID:-}
+      ADMIN_2_PASSWORD: ${ADMIN_2_PASSWORD:-}
+      ADMIN_3_ID: ${ADMIN_3_ID:-}
+      ADMIN_3_PASSWORD: ${ADMIN_3_PASSWORD:-}
     volumes:
       # REQUIRED for settings saved through the dashboard to survive a
       # container restart/recreate. Without this, saved credentials are

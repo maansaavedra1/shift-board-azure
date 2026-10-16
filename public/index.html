@@ -322,6 +322,12 @@
 
   .group-body { border-top: 1px solid var(--border); }
   .group.collapsed .group-body { display: none; }
+  /* Preliminary state: shown while the schedule/leave data is still loading
+     for the first time after a start-up, so the counts don't look final. */
+  .summary.preliminary .summary-card { opacity: .6; border-style: dashed; }
+  .prelim-note { display: none; margin: 0 0 10px; padding: 8px 14px; border: 1px dashed var(--border); border-radius: 6px; font-size: 12px; color: var(--text-muted); background: var(--panel-2); }
+  .prelim-note.visible { display: block; }
+  .prelim-note strong { color: var(--text); letter-spacing: .04em; text-transform: uppercase; font-size: 11px; margin-right: 6px; }
   .shift-filter-row { padding: 10px 16px; background: var(--panel-2); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
   .shift-filter-row label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
   .shift-filter-select { background: var(--panel); border: 1px solid var(--border); color: var(--text); font-family: var(--font-mono); font-size: 12px; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
@@ -441,7 +447,7 @@
   .icon-badge:hover { background: var(--border); color: var(--text-muted); }
   .icon-badge svg { width: 16px; height: 16px; }
   .site-footer-right { font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); display: flex; gap: 12px; }
-  .theme-switch-row { display: flex; justify-content: center; margin-top: 16px; }  /* Login / register gate — shown instead of the dashboard until a
+  .theme-switch-row { display: flex; justify-content: center; margin-top: 16px; }  /* Login gate — shown instead of the dashboard until a
      valid session exists. Matches the app's existing card/button style
      rather than introducing a separate visual language. */
   #authGate {
@@ -530,22 +536,12 @@
 
     <div id="loginForm">
       <div class="auth-title">Shift Board Login</div>
-      <div class="auth-subtitle">Sign in with your System ID.</div>
+      <div class="auth-subtitle">Sign in with your System ID and password.</div>
       <input type="text" id="loginSystemId" placeholder="Enter your System ID" autocomplete="username">
       <input type="password" id="loginPassword" placeholder="Enter your password" autocomplete="current-password">
       <button class="auth-submit" id="loginSubmitBtn">Log In</button>
-      <div class="auth-toggle">Not registered yet? <a id="showRegisterLink">Register</a></div>
     </div>
 
-    <div id="registerForm" style="display:none;">
-      <div class="auth-title">Register</div>
-      <div class="auth-subtitle">Only approved System IDs can register. Yours is checked against the current Sprout employee list.</div>
-      <input type="text" id="registerSystemId" placeholder="Enter your System ID" autocomplete="username">
-      <input type="password" id="registerPassword" placeholder="Choose a password (min. 8 characters)" autocomplete="new-password">
-      <input type="password" id="registerPasswordConfirm" placeholder="Confirm password" autocomplete="new-password">
-      <button class="auth-submit" id="registerSubmitBtn">Register</button>
-      <div class="auth-toggle">Already registered? <a id="showLoginLink">Log In</a></div>
-    </div>
   </div>
 </div>
 
@@ -586,7 +582,6 @@
     <span class="status-text" id="scheduleAdjustmentNote" style="opacity:0.65;"></span>
     <span class="settings-link" id="settingsLink">Change URL</span>
     <span class="settings-link" id="sproutSettingsLink">Credentials</span>
-    <span class="settings-link" id="resetAdminLink">Reset an admin account</span>
     <span class="settings-link" id="logoutLink">Log out</span>
   </div>
 
@@ -607,19 +602,6 @@
       Saved server-side, not in your browser — used for every Sprout HR request from here on. Leave a field blank to keep its current value.<br>
       <strong>One-time setup:</strong> since these live on the server, they already work for everyone, on every device — no need to re-enter them elsewhere. The <strong>Shift Board API URL</strong> above works differently — it's saved per-browser, so that one does need re-pasting on another device or browser.<br>
       <strong>Login required.</strong> This page is only reachable once you're signed in — see the login screen if you haven't already.
-    </div>
-  </div>
-
-  <div class="setup-box" id="resetAdminPanel" style="display:none;">
-    <div class="label">Reset an admin's account (if they forgot their password)</div>
-    <div id="resetAdminError" class="banner error" style="display:none;"></div>
-    <div id="resetAdminSuccess" class="banner info" style="display:none;"></div>
-
-    <input type="text" id="resetAdminSystemId" placeholder="Enter the System ID to reset" inputmode="numeric" pattern="[0-9]*">
-    <button id="resetAdminBtn">Reset This Account</button>
-
-    <div style="font-size: 11px; opacity: 0.6; margin-top: 14px; line-height: 1.5;">
-      Clears their saved password entirely — they'll need to <strong>register again from scratch</strong> with a new password. You're doing this because you're already logged in yourself; with a small admin list, that's the actual verification here, not a formal identity check.
     </div>
   </div>
 
@@ -655,6 +637,8 @@
     <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
     <input type="text" id="employeeSearch" placeholder="Search employee name...">
   </div>
+
+  <div class="prelim-note" id="preliminaryNote"></div>
 
   <div class="summary" id="summaryBlock">
     <div class="summary-card late" data-status="late"><div class="label">Late (Shift Ongoing) <span class="info-icon" data-tooltip="No log-in or log-out recorded yet, and their shift hasn't ended — still time for them to show up."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="11"></line><circle cx="12" cy="8" r="0.5" fill="currentColor" stroke="none"></circle></svg></span></div><div class="count" id="countLate">—</div></div>
@@ -973,6 +957,85 @@
     return hourPart + ' ' + minutes + ' minute' + (minutes === 1 ? '' : 's');
   }
 
+  // --- Preliminary state + automatic re-check while the cache first fills ---
+  // After a start-up the schedule/leave cache is empty for a few minutes, so
+  // the first counts are judged against default schedules and then shift as
+  // each person's data arrives. Instead of presenting those numbers as final
+  // (and leaving them frozen until someone presses Refresh), the cards are
+  // marked preliminary and the board quietly re-checks every ~15 seconds
+  // until the first sync completes, or for 6 minutes at most.
+  var AUTO_REFRESH_EVERY_MS = 15 * 1000;
+  var AUTO_REFRESH_GIVE_UP_MS = 6 * 60 * 1000;
+  var autoRefreshTimer = null;
+  var autoRefreshDeadline = null;
+
+  function isPreliminary(cache) {
+    return !!cache && !cache.lastRefreshedAt;
+  }
+
+  function cancelAutoRefresh() {
+    if (autoRefreshTimer) { clearTimeout(autoRefreshTimer); autoRefreshTimer = null; }
+    autoRefreshDeadline = null;
+  }
+
+  function scheduleAutoRefresh() {
+    if (autoRefreshTimer) return;
+    if (autoRefreshDeadline === null) autoRefreshDeadline = Date.now() + AUTO_REFRESH_GIVE_UP_MS;
+    if (Date.now() > autoRefreshDeadline) { autoRefreshDeadline = null; return; }
+    autoRefreshTimer = setTimeout(function () {
+      autoRefreshTimer = null;
+      fetchReport(true);
+    }, AUTO_REFRESH_EVERY_MS);
+  }
+
+  function renderPreliminaryState(cache) {
+    var block = document.getElementById('summaryBlock');
+    var note = document.getElementById('preliminaryNote');
+    if (!isPreliminary(cache)) {
+      block.classList.remove('preliminary');
+      note.classList.remove('visible');
+      note.textContent = '';
+      return;
+    }
+    block.classList.add('preliminary');
+    var progress = '';
+    if (cache.employeesTotal) {
+      progress = ' (' + (cache.employeesProcessed || 0) + ' of ' + cache.employeesTotal + ' employees checked)';
+    }
+    var gaveUp = autoRefreshDeadline === null && !autoRefreshTimer;
+    note.innerHTML = '<strong>Preliminary</strong>Leave and schedule changes are still loading' + progress + '. '
+      + (gaveUp ? 'Press Refresh to check again.' : 'These counts will update on their own.');
+    note.classList.add('visible');
+  }
+
+  // A silent re-check re-renders the whole list, which would collapse
+  // anything the person had expanded and reset their shift filter. These two
+  // carry that small bit of state across the re-render.
+  function captureViewState() {
+    var expanded = [];
+    document.querySelectorAll('#groupsContainer .group').forEach(function (g) {
+      if (!g.classList.contains('collapsed')) {
+        STATUS_ORDER.forEach(function (st) { if (g.classList.contains(st)) expanded.push(st); });
+      }
+    });
+    var sel = document.querySelector('#groupsContainer .shift-filter-select');
+    return { expanded: expanded, shiftFilter: sel ? sel.value : null };
+  }
+
+  function restoreViewState(state) {
+    state.expanded.forEach(function (st) {
+      var g = document.querySelector('#groupsContainer .group.' + st);
+      if (g) g.classList.remove('collapsed');
+    });
+    if (state.shiftFilter && state.shiftFilter !== '__all__') {
+      var sel = document.querySelector('#groupsContainer .shift-filter-select');
+      if (sel && Array.prototype.some.call(sel.options, function (o) { return o.value === state.shiftFilter; })) {
+        sel.value = state.shiftFilter;
+        sel.dispatchEvent(new Event('change'));
+      }
+    }
+  }
+
   function scheduleAdjustmentCacheMessage(cache) {
     if (!cache) return null;
     if (cache.lastRefreshedAt) {
@@ -995,7 +1058,7 @@
     if (cache.lastError) {
       return 'Schedule adjustments could not load yet (' + cache.lastError + ') — will keep retrying in the background.';
     }
-    return 'Schedule adjustments are still loading for the first time — one-off schedule changes may not show yet. This can take a few minutes for a large employee list.';
+    return 'Schedule adjustments are still loading for the first time — leave and one-off schedule changes may not show yet, so the counts below are preliminary and will update on their own. This can take a few minutes for a large employee list.';
   }
 
   // Small, persistent (not just cold-start) note next to "Last updated" —
@@ -1597,14 +1660,20 @@
     } catch (e) {}
   }
 
-  function fetchReport() {
+  function fetchReport(silentArg) {
+    // Only an explicit `true` means a background re-check — the Refresh
+    // button passes its click event here, which must NOT count as silent.
+    var silent = silentArg === true;
     var url = getSavedUrl();
     if (!url) { showSetup(true); return; }
 
+    // A person-initiated load restarts the automatic re-check window.
+    if (!silent) cancelAutoRefresh();
+
     nudgeScheduleAdjustmentSync(url);
 
-    hideError();
-    setLoadingState(true);
+    if (!silent) hideError();
+    if (!silent) setLoadingState(true);
     var loadingMsg;
     if (selectedCustomRange) {
       loadingMsg = '<span class="hourglass">⏳</span> Loading ' + selectedCustomRange.from + ' to ' + selectedCustomRange.to + '... this may take a moment';
@@ -1613,7 +1682,7 @@
     } else {
       loadingMsg = '<span class="hourglass">⏳</span> Loading...';
     }
-    document.getElementById('lastUpdated').innerHTML = loadingMsg;
+    if (!silent) document.getElementById('lastUpdated').innerHTML = loadingMsg;
 
     var requestUrl = url;
     if (selectedCustomRange) {
@@ -1632,6 +1701,7 @@
     }).then(function (data) {
       setLoadingState(false);
       if (!data.ok) {
+        if (silent) { scheduleAutoRefresh(); return; }
         showError('The backend reported an error from Sprout: ' + data.error);
         document.getElementById('lastUpdated').textContent = 'Failed to load';
         return;
@@ -1647,6 +1717,8 @@
         // Multi-day view — no single-day summary cards (each day has its
         // own breakdown further down instead), but export is available.
         summaryBlock.style.display = 'none';
+        cancelAutoRefresh();
+        renderPreliminaryState(null);
         lastReport = null;
         lastMultiDayReports = data.reports;
         renderMultiDayReports(data.reports);
@@ -1658,9 +1730,18 @@
       } else {
         summaryBlock.style.display = '';
         lastMultiDayReports = null;
+        var viewState = silent ? captureViewState() : null;
         renderReport(data.report);
+        if (viewState) restoreViewState(viewState);
         lastReport = data.report;
 
+        var dayCache = data.report.scheduleAdjustmentCache;
+        if (isPreliminary(dayCache)) {
+          scheduleAutoRefresh();
+        } else {
+          cancelAutoRefresh();
+        }
+        renderPreliminaryState(dayCache);
         renderScheduleAdjustmentNote(data.report.scheduleAdjustmentCache);
         var adjMsg = scheduleAdjustmentCacheMessage(data.report.scheduleAdjustmentCache);
         if (adjMsg) {
@@ -1677,6 +1758,7 @@
     }).catch(function (err) {
       setLoadingState(false);
       if (err.message === '__session_expired__') return; // already handled — auth gate is shown, no error banner needed
+      if (silent) { scheduleAutoRefresh(); return; } // a background re-check failing shouldn't pop an error over the board
       // TypeError here means fetch() itself failed (bad URL, network issue,
       // CORS) — the other error types below all come from explicit throws
       // above with a message already tailored to what happened.
@@ -1854,17 +1936,6 @@
     document.getElementById('authError').style.display = 'none';
   }
 
-  document.getElementById('showRegisterLink').addEventListener('click', function () {
-    clearAuthError();
-    document.getElementById('loginForm').style.display = 'none';
-    document.getElementById('registerForm').style.display = 'block';
-  });
-  document.getElementById('showLoginLink').addEventListener('click', function () {
-    clearAuthError();
-    document.getElementById('registerForm').style.display = 'none';
-    document.getElementById('loginForm').style.display = 'block';
-  });
-
   document.getElementById('loginSubmitBtn').addEventListener('click', function () {
     clearAuthError();
     var systemId = document.getElementById('loginSystemId').value.trim();
@@ -1888,91 +1959,13 @@
       });
   });
 
-  document.getElementById('registerSubmitBtn').addEventListener('click', function () {
-    clearAuthError();
-    var systemId = document.getElementById('registerSystemId').value.trim();
-    var password = document.getElementById('registerPassword').value;
-    var confirmPassword = document.getElementById('registerPasswordConfirm').value;
-
-    if (!systemId || !password) { authError('Enter your System ID and a password.'); return; }
-    if (password !== confirmPassword) { authError('Passwords do not match.'); return; }
-    if (password.length < 8) { authError('Password must be at least 8 characters.'); return; }
-
-    fetch('/api/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ systemId: systemId, password: password })
-    }).then(function (res) { return res.json().then(function (body) { return { res: res, body: body }; }); })
-      .then(function (result) {
-        if (!result.res.ok || !result.body.ok) {
-          authError(result.body.error || 'Could not register.');
-          return;
-        }
-        showAuthGate(false);
-        startApp();
-      }).catch(function (err) {
-        authError('Could not register: ' + err.message);
-      });
-  });
-
   document.getElementById('logoutLink').addEventListener('click', function () {
     fetch('/api/auth/logout', { method: 'POST' }).finally(function () {
       window.location.reload();
     });
   });
 
-  // --- Admin-assisted account reset ---
-  var resetAdminOpen = false;
-  document.getElementById('resetAdminLink').addEventListener('click', function () {
-    resetAdminOpen = !resetAdminOpen;
-    document.getElementById('resetAdminPanel').style.display = resetAdminOpen ? 'block' : 'none';
-  });
-
-  // System IDs are always numeric — strips anything else as it's typed,
-  // rather than just hinting at it via placeholder/pattern (which don't
-  // actually block invalid characters from being entered).
-  document.getElementById('resetAdminSystemId').addEventListener('input', function (e) {
-    var digitsOnly = e.target.value.replace(/[^0-9]/g, '');
-    if (digitsOnly !== e.target.value) e.target.value = digitsOnly;
-  });
-
-  document.getElementById('resetAdminBtn').addEventListener('click', function () {
-    var errEl = document.getElementById('resetAdminError');
-    var okEl = document.getElementById('resetAdminSuccess');
-    errEl.style.display = 'none';
-    okEl.style.display = 'none';
-
-    var systemId = document.getElementById('resetAdminSystemId').value.trim();
-    if (!systemId) {
-      errEl.textContent = 'Enter the System ID to reset.';
-      errEl.style.display = 'block';
-      return;
-    }
-    if (!window.confirm('This clears the saved password for System ID ' + systemId + ' — they\'ll need to register again from scratch. Continue?')) {
-      return;
-    }
-
-    fetch('/api/auth/reset-account', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ systemId: systemId })
-    }).then(function (res) { return res.json().then(function (body) { return { res: res, body: body }; }); })
-      .then(function (result) {
-        if (!result.res.ok || !result.body.ok) {
-          errEl.textContent = result.body.error || 'Could not reset that account.';
-          errEl.style.display = 'block';
-          return;
-        }
-        okEl.textContent = 'Done — System ID ' + systemId + ' can now register again with a new password.';
-        okEl.style.display = 'block';
-        document.getElementById('resetAdminSystemId').value = '';
-      }).catch(function (err) {
-        errEl.textContent = 'Could not reset that account: ' + err.message;
-        errEl.style.display = 'block';
-      });
-  });
-
-  // Checked once on page load. Shows the login/register gate if there's no
+  // Checked once on page load. Shows the login gate if there's no
   // valid session; otherwise hides it and starts the dashboard as normal.
   function checkAuthAndStart() {
     fetch('/api/auth/session').then(function (res) { return res.json(); }).then(function (data) {

@@ -440,6 +440,53 @@ async function fetchAndCacheAdjustmentsForEmployee(employeeId, dateFromISO, date
 // this stays comfortably under Sprout's rate limit (observed as roughly
 // 10 requests/second) even at Firstmac's employee count. Safe to call
 // repeatedly — guards against overlapping runs.
+// --- Sweep ordering: check the people most likely to be wrong first ------
+//
+// While the schedule/leave cache is still filling (cold start), the board
+// judges everyone against their DEFAULT schedule, so the people whose
+// category is most likely to change once their data arrives are the ones
+// with no clock-in yet today — they may be on leave, on a rest day, or on
+// an adjusted shift. Everyone who has already punched in is almost always
+// right as-is. So the sweep fetches the no-punch-yet people first, which
+// makes the visible counts settle in a fraction of the time, using exactly
+// the same number of Sprout calls (it only changes the ORDER).
+//
+// Costs zero extra calls: the "who has punched today" set is remembered
+// from the attendance logs a dashboard load already fetches. If it is
+// missing or old (nobody has loaded the board lately), the sweep simply
+// falls back to roster order.
+const punchedTodayHint = { bioIds: null, dayKey: null, at: 0 };
+const PUNCH_HINT_MAX_AGE_MS = 15 * 60 * 1000;
+
+function rememberPunchedToday(logs, todayKey) {
+  const ids = new Set();
+  (logs || []).forEach((log) => {
+    if (log.bioEmpID === undefined || log.bioEmpID === null) return;
+    const t = parseManilaDateTime(log.logTime);
+    if (!t || isNaN(t.getTime())) return;
+    if (formatDateKey(t) === todayKey) ids.add(String(log.bioEmpID));
+  });
+  punchedTodayHint.bioIds = ids;
+  punchedTodayHint.dayKey = todayKey;
+  punchedTodayHint.at = Date.now();
+}
+
+function orderForSweep(remaining) {
+  const hint = punchedTodayHint;
+  const fresh = hint.bioIds
+    && hint.dayKey === formatDateKey(new Date())
+    && (Date.now() - hint.at) < PUNCH_HINT_MAX_AGE_MS;
+  if (!fresh) return remaining;
+  const needsAttention = [];
+  const alreadyPunched = [];
+  remaining.forEach((emp) => {
+    const bio = emp.workInformation && emp.workInformation.biometricId;
+    const hasPunch = bio !== undefined && bio !== null && hint.bioIds.has(String(bio));
+    (hasPunch ? alreadyPunched : needsAttention).push(emp);
+  });
+  return needsAttention.concat(alreadyPunched);
+}
+
 async function refreshScheduleAdjustmentsCache() {
   if (scheduleAdjustmentCacheState.isRefreshing) return; // already running — skip this trigger
   scheduleAdjustmentCacheState.isRefreshing = true;
@@ -471,15 +518,24 @@ async function refreshScheduleAdjustmentsCache() {
     // resigned/terminated people from getEmployees() itself, so this
     // cache naturally stops being asked about them going forward too.
 
-    for (let i = 0; i < employees.length; i += BATCH_SIZE) {
-      const batch = employees.slice(i, i + BATCH_SIZE);
+    // Re-ordered before every batch (not once up front): on a cold start
+    // the sweep begins before the dashboard's attendance logs have come
+    // back, so the first batch or two may be in roster order — as soon as
+    // the "who has punched" hint arrives, everything still waiting is
+    // re-sorted with the no-punch-yet people first.
+    let remaining = employees.slice();
+    let processed = 0;
+    while (remaining.length > 0) {
+      remaining = orderForSweep(remaining);
+      const batch = remaining.splice(0, BATCH_SIZE);
       await Promise.all(batch.map((emp) => {
         const employeeId = emp.basicInformation && emp.basicInformation.systemId;
         if (employeeId == null) return Promise.resolve();
         return fetchAndCacheAdjustmentsForEmployee(employeeId, dateFromISO, dateToISO);
       }));
-      scheduleAdjustmentCacheState.employeesProcessed = Math.min(i + BATCH_SIZE, employees.length);
-      if (i + BATCH_SIZE < employees.length) {
+      processed += batch.length;
+      scheduleAdjustmentCacheState.employeesProcessed = processed;
+      if (remaining.length > 0) {
         await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
       }
     }
@@ -981,6 +1037,7 @@ async function computeTodayReport() {
   const employees = await getEmployees(empResp.status === 'fulfilled' ? empResp.value : undefined);
   const logs = await getAttendanceLogs(logsFromISO, logsToISO, attResp.status === 'fulfilled' ? attResp.value : undefined);
 
+  rememberPunchedToday(logs, todayKey); // hint for the background sweep's ordering — no extra calls
   const logsByBioId = buildLogsByBioId(logs);
   const dayContext = {
     weekday: todayWeekday,

@@ -1,27 +1,27 @@
 /**
- * Authentication for the dashboard: System ID + password login, restricted
- * to a dev-curated allowlist of System IDs, with each account's identity
- * double-checked against real Sprout employee data at registration time
- * (so someone can't register under a System ID that isn't actually a real
- * employee, even if it somehow ended up on the allowlist by mistake).
+ * Authentication for the dashboard: System ID + password login against
+ * admin credentials defined entirely by indexed environment variables.
  *
- * This replaces what used to be a fully open, no-login dashboard — see
- * README's "Authentication" section for the full reasoning and setup.
+ * There is no self-service signup and nothing is stored on disk. Each
+ * admin is a numbered pair of env vars, set by whoever operates the
+ * deployment:
  *
- * Storage: a plain JSON file on disk (data/admin-accounts.json), same
- * pattern as config-store.js's saved Sprout settings. Passwords are never
- * stored in plain text — only a bcrypt hash. The same Docker-volume
- * caveat applies: without a persistent volume over data/, accounts are
- * lost on container restart, same as Sprout credentials would be.
+ *   ADMIN_1_ID=<system id>        ADMIN_1_PASSWORD=<that admin's password>
+ *   ADMIN_2_ID=<system id>        ADMIN_2_PASSWORD=<password>
+ *
+ * This replaces the previous model (ADMIN_ALLOWLIST + self-registration +
+ * data/admin-accounts.json), whose accounts file lived on container-local
+ * storage and was lost on every restart/redeploy/scale event unless a
+ * persistent volume was mounted — forcing admins to re-register.
+ * Environment variables travel with the Container App's configuration, so
+ * they survive restarts with no volume at all.
+ *
+ * Passwords are plaintext in the environment by design (see README's
+ * Authentication section for the tradeoff). Keep them in the hosting
+ * environment's secret store, never in source control or logs.
  */
 
-const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
-
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const ACCOUNTS_PATH = path.join(DATA_DIR, 'admin-accounts.json');
 
 const SESSION_COOKIE_NAME = 'sb_session';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
@@ -36,137 +36,74 @@ if (!process.env.SESSION_SECRET) {
   console.warn('SESSION_SECRET is not set — using a random key for this process only. Everyone will be logged out on every restart until this is set explicitly.');
 }
 
-function getAllowlist() {
-  const raw = process.env.ADMIN_ALLOWLIST || '';
-  return raw.split(',').map((s) => s.trim()).filter((s) => s !== '');
+// Warn-once helper: getCredentials() runs on every protected request, so a
+// misconfigured pair would otherwise log on every single call.
+const warnedOnce = new Set();
+function warnOnce(key, message) {
+  if (warnedOnce.has(key)) return;
+  warnedOnce.add(key);
+  console.warn(message);
 }
 
-function loadAccounts() {
-  if (!fs.existsSync(ACCOUNTS_PATH)) return {};
-  // Deliberately NOT caught here — a file that exists but fails to
-  // parse (e.g. truncated by a crash mid-write) is a genuinely
-  // different situation from "no accounts yet", and callers need to be
-  // able to tell them apart. Silently returning {} for both meant a
-  // corrupt file looked identical to a fresh install — and the next
-  // registration would then write a file containing only that one
-  // account, permanently losing everyone else who was in the corrupted
-  // file but unreadable.
-  return JSON.parse(fs.readFileSync(ACCOUNTS_PATH, 'utf8'));
-}
-
-function saveAccounts(accounts) {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  // Written to a temp file and renamed into place, rather than written
-  // directly — rename is atomic on the same filesystem, so a crash
-  // mid-write leaves either the old complete file or the new complete
-  // file, never a half-written, corrupt one.
-  const tempPath = `${ACCOUNTS_PATH}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify(accounts, null, 2));
-  fs.renameSync(tempPath, ACCOUNTS_PATH);
-}
-
-// Confirms a System ID corresponds to a real, currently-returned Sprout
-// employee — not just a well-formed number. Takes the already-fetched
-// employee list (from getEmployees()) rather than fetching itself, so
-// this stays fast and doesn't add its own separate Sprout call.
-function isRealEmployee(systemId, employees) {
-  return employees.some((emp) => String(emp.basicInformation && emp.basicInformation.systemId) === String(systemId));
-}
-
-function register(systemId, password, employees) {
-  systemId = String(systemId).trim();
-  if (!systemId || !password) {
-    throw new Error('System ID and password are both required.');
-  }
-  // Session tokens are "<systemId>.<expiry>.<signature>" — a System ID
-  // containing a "." would split into the wrong number of parts and
-  // silently fail verification on every single request afterward. No
-  // real Sprout System ID has ever contained one (they're numeric), but
-  // the failure mode this guards against — login appears to succeed,
-  // then every subsequent request 401s for no visible reason — is
-  // disproportionately confusing for what a one-line check prevents.
-  if (systemId.includes('.')) {
-    throw new Error('System ID cannot contain a period.');
-  }
-  if (password.length < 8) {
-    throw new Error('Password must be at least 8 characters.');
-  }
-  if (!getAllowlist().includes(systemId)) {
-    throw new Error('This System ID is not on the approved admin list. Contact your administrator to be added.');
-  }
-  if (!isRealEmployee(systemId, employees)) {
-    throw new Error('This System ID does not match a current Sprout employee record.');
-  }
-
-  const accounts = loadAccounts();
-  if (accounts[systemId]) {
-    throw new Error('An account for this System ID already exists. Use the login screen instead.');
-  }
-
-  // A registration for an allowlisted System ID succeeding with ZERO other
-  // accounts on file is the exact signature of the persistent-storage
-  // wipe (see AZURE_DEPLOYMENT.md Step 4/6 and the account-wipe incident
-  // write-up) — a brand new deployment would also hit this once, but a
-  // deployment that's been live long enough to have an allowlist and real
-  // admins should not be registering into an empty store. Logged loudly
-  // (not just a normal info line) so it shows up in the Azure Log Stream
-  // on its own, without anyone needing to go looking for it.
-  const accountCountBeforeThisOne = Object.keys(accounts).length;
-  if (accountCountBeforeThisOne === 0) {
-    console.error(`⚠️  ACCOUNT STORE APPEARS EMPTY — registering "${systemId}" as if this were the very first admin ever. If this deployment has had admins before, this almost certainly means /app/data is not on a persistent volume and was just wiped (container restart/redeploy/scale event). See AZURE_DEPLOYMENT.md Step 4/6. If this really is the first-ever registration on a fresh deployment, this warning is expected and can be ignored.`);
-  }
-
-  const passwordHash = bcrypt.hashSync(password, 10);
-  accounts[systemId] = { passwordHash, registeredAt: new Date().toISOString() };
-  saveAccounts(accounts);
-}
-
-async function verifyLogin(systemId, password) {
-  systemId = String(systemId).trim();
-  // Re-checked on every login, not just at registration — removing
-  // someone from the allowlist and redeploying should actually revoke
-  // them, not just block new signups. See requireSession below for the
-  // other half of this (an *existing* session also needs to stop
-  // working, not just future logins).
-  if (!getAllowlist().includes(systemId)) return false;
-  const accounts = loadAccounts();
-  const account = accounts[systemId];
-  if (!account) return false;
-  // Async, not compareSync — bcrypt is deliberately slow (by design, to
-  // resist cracking), but the sync version holds Node's single thread
-  // for the full ~150-300ms with no yielding. A handful of login
-  // attempts per second is enough to starve every other request,
-  // including the health check. The async version offloads the actual
-  // hashing to bcrypt's internal thread pool instead.
-  return new Promise((resolve, reject) => {
-    bcrypt.compare(password || '', account.passwordHash, (err, result) => {
-      if (err) return reject(err);
-      resolve(result);
-    });
+// Reads the admin credentials from the environment and returns a
+// { systemId: password } map. Scans for ADMIN_<n>_ID rather than assuming
+// contiguous numbering, so gaps (ADMIN_1, ADMIN_3) are tolerated. Never
+// throws — an unset/empty configuration returns {} (nobody can log in).
+function getCredentials() {
+  const creds = {};
+  Object.keys(process.env).forEach((key) => {
+    const match = /^ADMIN_(\d+)_ID$/.exec(key);
+    if (!match) return;
+    const n = match[1];
+    const id = String(process.env[key] || '').trim();
+    const password = process.env[`ADMIN_${n}_PASSWORD`];
+    // A pair with BOTH values empty is an unused slot (e.g. docker-compose
+    // passes blank ADMIN_3_* through) — ignore it silently. Only a
+    // half-filled pair is a likely mistake worth warning about.
+    if (!id && !password) return;
+    if (!id || !password) {
+      warnOnce(`pair-${n}`, `ADMIN_${n}_ID / ADMIN_${n}_PASSWORD: both must be set and non-empty — skipping this pair.`);
+      return;
+    }
+    // Session tokens are "<systemId>.<expiry>.<signature>" — a System ID
+    // containing a "." would split into the wrong number of parts and
+    // silently fail verification on every request afterward.
+    if (id.includes('.')) {
+      warnOnce(`dot-${n}`, `ADMIN_${n}_ID contains a period, which breaks session tokens — skipping this pair.`);
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(creds, id)) {
+      warnOnce(`dup-${id}`, `System ID "${id}" is defined by more than one ADMIN_<n>_ID pair — the later one wins.`);
+    }
+    creds[id] = password;
   });
+  return creds;
+}
+
+// Kept so existing callers keep working: the set of valid System IDs is
+// simply the IDs present across the configured pairs.
+function getAllowlist() {
+  return Object.keys(getCredentials());
 }
 
 function accountExists(systemId) {
-  const accounts = loadAccounts();
-  return !!accounts[String(systemId).trim()];
+  return Object.prototype.hasOwnProperty.call(getCredentials(), String(systemId).trim());
 }
 
-// Admin-assisted password reset: any currently logged-in admin can clear
-// another (or their own) account's entry, letting that System ID
-// register fresh with a new password. Deliberately not self-service by
-// the person who forgot their password — since they can't log in, they
-// couldn't trigger this themselves anyway. With only a small, known set
-// of admins, having any one of them vouch for the reset (by already
-// being logged in themselves) is a reasonable bar — see README for the
-// full reasoning and the tradeoffs against a real email-based reset.
-function resetAccount(systemId) {
-  systemId = String(systemId).trim();
-  const accounts = loadAccounts();
-  if (!accounts[systemId]) {
-    throw new Error('No account exists for this System ID.');
-  }
-  delete accounts[systemId];
-  saveAccounts(accounts);
+// Constant-time password check. Both values are HMAC'd to fixed-length
+// digests first so timingSafeEqual always compares equal-length buffers
+// (a direct === or length-dependent comparison can leak information via
+// timing). Unknown IDs are compared against a dummy value so a missing
+// account takes the same path as a wrong password.
+const digest = (value) => crypto.createHmac('sha256', SESSION_SECRET).update(String(value)).digest();
+
+async function verifyLogin(systemId, password) {
+  const id = String(systemId || '').trim();
+  const creds = getCredentials();
+  const known = Object.prototype.hasOwnProperty.call(creds, id);
+  const stored = known ? creds[id] : '\u0000no-such-account';
+  const matches = crypto.timingSafeEqual(digest(password || ''), digest(stored));
+  return known && matches;
 }
 
 // --- Session tokens -----------------------------------------------------
@@ -203,24 +140,18 @@ function verifySessionToken(token) {
 }
 
 // Express middleware — blocks the request with 401 unless a valid,
-// unexpired session cookie is present. Attaches req.systemId on success.
+// unexpired session cookie is present AND that System ID is still
+// configured in the environment. Sessions are stateless, so this
+// per-request check is what makes revocation real: removing an admin's
+// ADMIN_<n>_ID / ADMIN_<n>_PASSWORD pair and restarting ends their
+// session on the very next request, not after the 12-hour TTL.
 function requireSession(req, res, next) {
   const session = verifySessionToken(req.cookies && req.cookies[SESSION_COOKIE_NAME]);
   if (!session) {
     return res.status(401).json({ ok: false, error: 'Not logged in.' });
   }
   try {
-    // A valid, unexpired token alone isn't enough — sessions are
-    // stateless (no server-side store to invalidate directly), so
-    // without this check an admin removed from the allowlist, or reset
-    // via "Reset an admin account", would keep full access on their
-    // existing cookie for up to the full 12-hour TTL. This makes removal
-    // and reset actually take effect immediately, on the very next
-    // request. Wrapped in try/catch since accountExists now reads a file
-    // that can throw on genuinely corrupt (not just missing) data — this
-    // runs on every protected request, so it needs a clean JSON error
-    // rather than relying on Express's default HTML error page.
-    if (!getAllowlist().includes(session.systemId) || !accountExists(session.systemId)) {
+    if (!accountExists(session.systemId)) {
       return res.status(401).json({ ok: false, error: 'Not logged in.' });
     }
   } catch (err) {
@@ -234,11 +165,10 @@ function requireSession(req, res, next) {
 module.exports = {
   SESSION_COOKIE_NAME,
   SESSION_TTL_MS,
+  getCredentials,
   getAllowlist,
-  register,
-  verifyLogin,
   accountExists,
-  resetAccount,
+  verifyLogin,
   createSessionToken,
   verifySessionToken,
   requireSession

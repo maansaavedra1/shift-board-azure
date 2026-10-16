@@ -61,6 +61,11 @@ az containerapp env create \
 
 ## Step 4 — Persistent storage for saved settings
 
+> **Note:** admin logins no longer depend on this volume — they come from
+> environment variables (see Step 5). This step now only matters for Sprout
+> credentials saved through the dashboard's Credentials panel, and only if
+> you do *not* set all four `SPROUT_*` variables at deploy time.
+
 **This step matters — don't skip it.** Credentials saved through the
 "Sprout settings" panel live in a file at `/app/data/sprout-config.json`
 inside the container. Without persistent storage attached, that file is
@@ -130,43 +135,56 @@ its original behavior — the Credentials panel stays visible and editable
 after deployment, same as before. This is only worth doing if you
 genuinely expect these values to need changing without a redeploy.
 
-**⚠️ Also required now — two more env vars for login to work at all:**
+**⚠️ Also required — admin logins and a session secret, or nobody can log in:**
+
+Admin credentials are no longer self-registered. Each admin is a numbered
+pair of environment variables, created by whoever deploys (the app never
+creates or stores accounts):
+
 ```
---env-vars ADMIN_ALLOWLIST=<comma-separated System IDs> SESSION_SECRET=<a long random string>
+ADMIN_1_ID=<system id>        ADMIN_1_PASSWORD=<password>
+ADMIN_2_ID=<system id>        ADMIN_2_PASSWORD=<password>
+SESSION_SECRET=<a long random string>
 ```
-- `ADMIN_ALLOWLIST` — without this, nobody can register a new account at
-  all (existing ones, if any, can still log in).
+
+Because the passwords are plaintext values, set them as Container App
+**secrets** and reference them, rather than as plain env values (plain
+values are readable by anyone who can view the app's configuration):
+
+```bash
+az containerapp secret set \
+  --name shift-board --resource-group shift-board-rg \
+  --secrets admin1-password=<password> admin2-password=<password> session-secret=<random>
+
+az containerapp update \
+  --name shift-board --resource-group shift-board-rg \
+  --set-env-vars ADMIN_1_ID=<system id> ADMIN_1_PASSWORD=secretref:admin1-password \
+                 ADMIN_2_ID=<system id> ADMIN_2_PASSWORD=secretref:admin2-password \
+                 SESSION_SECRET=secretref:session-secret
+```
+
+*(Same honesty standard as the rest of this guide: the `secretref:` syntax
+is Azure's documented pattern but hasn't been run against this specific
+app — if a command is rejected, check it against the current
+`az containerapp secret` docs.)*
+
+- `ADMIN_<n>_ID` / `ADMIN_<n>_PASSWORD` — add one pair per admin. Without
+  at least one pair, nobody can log in. **`ADMIN_ALLOWLIST` is no longer
+  read** — remove it from the Container App.
 - `SESSION_SECRET` — without this, a random key is generated fresh each
   time the container starts, which means **everyone gets logged out on
   every restart or redeploy**. Generate one once (e.g.
-  `openssl rand -hex 32`) and use the same value every time you deploy.
+  `openssl rand -hex 32`) and keep the same value.
+- To change a password or revoke an admin, edit/remove the pair and let a
+  new revision start. Removing a pair ends that admin's active session on
+  the next request.
 
-See `README.md`'s "Authentication" section for the full picture of how
-registration and login work.
+**Order matters when moving from the previous (self-registration) build:
+set the `ADMIN_<n>_*` variables and `SESSION_SECRET` *before* deploying
+this build.** Deploying first leaves nobody able to log in until they are
+set, and there is no way to register your way back in.
 
-**⚠️ CRITICAL — `SPROUT_BASE` defaults to the SANDBOX environment
-(`gateway-sb.sprout.ph`) if not explicitly set.** This is the one thing
-in this whole deployment that fails *silently* if missed — the app will
-run perfectly, load data, show no errors, and everyone will assume it's
-working... while quietly showing sandbox/test data instead of real
-production attendance. No crash, no red banner, nothing that flags it.
-
-For a real production deployment, explicitly add the real production
-`SPROUT_BASE` value as an environment variable in this `az containerapp
-create` command. This value is intentionally NOT editable from the
-dashboard's Credentials panel even when that panel is visible — see
-`README.md`'s "Setting Sprout credentials" section for why — so it can
-only be set here, at deployment time, by whoever's running this command.
-
-**`--min-replicas 0` — cost-saving setting.** This lets the container
-scale down to zero (and stop being billed) when nobody's using it, and
-start back up automatically in a few seconds when someone opens the URL.
-Good fit for a low-traffic internal tool. The tradeoff: whoever opens
-the dashboard after a period of no use will see a few seconds' delay on
-that first load while it spins back up — not an error, just a brief
-wait. If this dashboard needs to feel instant every time (e.g. checked
-constantly throughout the day), change this back to `--min-replicas 1`,
-which keeps it always-on but costs more.
+See `README.md`'s "Authentication" section for the full picture.
 
 ## Step 6 — Mount the storage to the container
 
@@ -260,10 +278,17 @@ same as any other website.
       and confirm the saved Sprout credentials are still there afterward
       — this is the real test that Step 4/6's persistent storage is
       actually working, not just that saving worked once
-- [ ] **Confirm `ADMIN_ALLOWLIST` and `SESSION_SECRET` are both set** —
-      without the first, nobody can register; without the second,
-      everyone gets logged out on every restart
-- [ ] Register a real admin account (using a real, allowlisted System
-      ID) and confirm login works after logging out and back in
-- [ ] Try registering a System ID that's *not* on the allowlist, and
-      confirm it's correctly rejected
+- [ ] **Confirm at least one `ADMIN_<n>_ID` / `ADMIN_<n>_PASSWORD` pair
+      and `SESSION_SECRET` are set** — the startup log prints
+      `Admin credentials configured: N` (a count only); without any pair
+      nobody can log in, and without `SESSION_SECRET` everyone gets logged
+      out on every restart
+- [ ] Log in with a configured System ID and password, log out, and log
+      back in
+- [ ] Confirm a wrong password and an unconfigured System ID both fail
+      with the same generic message
+- [ ] **Restart the container app and log in again with the same
+      password** — this is the real test that accounts survive a restart
+      (they now come from the environment, so no persistent volume is
+      involved for logins)
+- [ ] Confirm there is no "Register" link anywhere on the login screen

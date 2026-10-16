@@ -1,10 +1,15 @@
 # Deployment notes — Tuesday, Sep 22, 2026
 
-Covers items 2, 3, 4, 5 from Firstmac's latest feedback batch, plus one
+> **This copy also includes the env-var login change (item 1).** Read the
+> "Item 1 — login now comes from environment variables" section below
+> *before* deploying: the operator must set the new variables first, or
+> nobody can log in.
+
+Covers items 1, 2, 3, 4, 5 from Firstmac's latest feedback batch, plus one
 newly-found bug (not from their feedback list, found while investigating
-the shift filter — see below, and read this one first). Items 1 (login/
-repeated registration) and 6 (data changing after refresh) are **not** in
-this build — see the client email thread for why each is still open.
+the shift filter — see below, and read this one first). Item 6 (data
+changing after refresh) is **not** in this build — see the client email
+thread for why it is still open.
 
 ## Read this one first — most severe finding in this batch
 
@@ -68,7 +73,11 @@ yet.
 | `public/index.html` | Shift-hours suffix rendered in the Late (Shift Ongoing) detail column | 2 |
 | `public/index.html` | "On AM leave" / "On PM leave" phrasing + leave type shown in the leave detail | 5 |
 | `public/index.html` | New shift-time filter dropdown on Late (Shift Ongoing) — appears only when more than one distinct shift is present in the current list | 3 |
-| `src/auth-store.js` | Logs a loud `⚠️ ACCOUNT STORE APPEARS EMPTY` warning if a registration succeeds against a zero-account store — does NOT fix the account-wipe issue, only makes a recurrence visible in the log stream immediately | related to item 1, not a fix |
+| `src/auth-store.js` | Rewritten: admin credentials read from indexed env vars (`ADMIN_<n>_ID` / `ADMIN_<n>_PASSWORD`); no signup, no accounts file, no bcrypt. Supersedes the earlier log-warning-only patch | 1 |
+| `src/server.js` | `POST /api/auth/register` and `POST /api/auth/reset-account` removed; startup log reports a credential count only | 1 |
+| `public/index.html` | Register form, "Reset an admin account" panel, and their JS removed | 1 |
+| `package.json` | `bcryptjs` dependency dropped | 1 |
+| `.env.example`, `docker-compose.yml`, `README.md`, `AZURE_DEPLOYMENT.md` | Document the new variables and the secretref/deploy-order guidance | 1 |
 
 ## Why item 2 and 5 needed a deploy at all
 
@@ -125,20 +134,99 @@ before assuming this same fix should have caught it.
 - [ ] Item 5: pick any employee in On Leave and confirm leave type is
       shown, and that a known half-day case shows "On AM leave" / "On PM
       leave" rather than plain "On leave"
-- [ ] Confirm login/session still works normally post-deploy (unrelated
-      to this build's changes, but any deploy is worth a basic smoke
-      test on this given item 1 is still an open, active issue)
+- [ ] **Item 1:** confirm the startup log says `Admin credentials
+      configured: N` with the expected N, log in with a configured admin,
+      **restart the Container App, and log in again** with the same
+      password (no re-registration). Confirm a wrong password and an
+      unconfigured System ID fail with the same generic message, and that
+      there is no Register link on the login screen
+
+## Item 1 — login now comes from environment variables
+
+**Root cause it removes:** accounts were stored in `data/admin-accounts.json`
+on container-local storage, so every restart/redeploy/scale-to-zero wiped
+them and admins were forced to re-register. Credentials now come from the
+Container App's environment, which survives all of those. **No Azure
+volume is needed for logins**, so the volume-mount handoff is no longer
+on the critical path for Tuesday (it still matters for Sprout credentials
+saved through the dashboard, unless all four `SPROUT_*` vars are set).
+
+**Operator must do this BEFORE deploying — the order matters:**
+1. Create the variables (use Container App *secrets* + `secretref:` for the
+   passwords — commands in `AZURE_DEPLOYMENT.md` Step 5):
+   `ADMIN_1_ID` / `ADMIN_1_PASSWORD`, one pair per admin, plus
+   `SESSION_SECRET` (a fixed value; generate once).
+2. Then deploy. `ADMIN_ALLOWLIST` is no longer read and can be removed.
+
+If this build goes out first, nobody can log in and there is no way to
+register back in (signup is gone).
+
+**What changes for Firstmac's admins:** they log in with the System ID and
+the password the operator set for them. There is no "Register" screen and
+no "Reset an admin account"; a password change is an operator edit.
+
+**Verified locally (real server, throwaway test values):** correct login
+works; wrong password and unknown ID both return the same generic error;
+pairs with a missing password or a `.` in the ID are skipped with a
+warning; gaps in numbering work; a pair with both values empty is ignored
+silently; register/reset return 404 with a valid session; nothing is
+written to disk; a session cookie stops working after its pair is removed
+and the app restarted; the app starts and rejects logins cleanly when
+nothing is configured.
+
+**Not verified:** behaviour on the real Container App (secretref wiring,
+whether the platform restarts cleanly with the new variables) — that is
+what the post-deploy checklist is for.
+
+**Security tradeoff, stated plainly:** passwords are plaintext in the
+environment, by design of this change. Use secrets, restrict who can view
+the Container App configuration, and keep the values out of source control
+and logs.
+
+## Data refresh after a restart (item 6) — what changed
+
+**Cause (confirmed from the client's two recordings):** after a start-up the
+schedule/leave cache is empty for ~3 minutes. During that time everyone is
+judged against their default schedule, then re-judged as each person's data
+arrives, so the counts move (Late 13 → 10 → 4, On Leave 6 → 9 → 14) while the
+total stays 356. Once loaded, the On Leave list matched Sprout's exactly.
+
+**Changes (no extra Sprout calls for the first two):**
+1. `src/sprout.js` — the background sync now checks people with **no clock-in
+   yet today** first (they are the ones most likely to be on leave, on a rest
+   day, or on an adjusted shift). The "who has punched" hint is remembered from
+   the attendance logs a dashboard load already fetches; if it is missing or
+   older than 15 minutes the sync falls back to roster order. Same number of
+   calls, different order.
+2. `public/index.html` — while the first sync is incomplete the cards are
+   dimmed with a dashed border and a **PRELIMINARY** note shows progress
+   ("60 of 359 employees checked"), so the numbers no longer look final.
+3. `public/index.html` — while preliminary, the board **re-checks on its own**
+   every 15 seconds (single-day view only), stops as soon as the sync finishes,
+   and gives up after 6 minutes (then asks the person to press Refresh).
+   Sections the person has expanded and their shift filter are kept across the
+   automatic re-checks. **Cost:** each re-check is a normal Today load
+   (~18 Sprout calls); typically ~8-12 re-checks per cold start (roughly
+   150-220 calls), at most 24 (~430) per open tab if the sync never finishes.
+   Count this if the call limit turns out to apply to the board.
+
+**Verified:** the real sweep against a mocked Sprout (no-punch people fetched
+first, nobody skipped or duplicated, same call count, old hint falls back to
+roster order); the real page in a simulated browser and in headless Chrome
+(preliminary marking, progress, automatic re-check, expanded sections kept,
+stops when finished, gives up after the window, manual Refresh unaffected).
+Each guard was mutation-checked: removing it fails the specific test.
+
+**Not verified:** the real Sprout API, and the real server under load. Sprout's
+actual response times decide how much faster the counts settle; the ordering
+only changes who is checked first.
+
+**Not changed:** the ~3 minute total sync time, and the sweep still starts on
+every restart. Setting minimum replicas to 1 is held until the API-call-limit
+question is answered.
 
 ## Not covered by this deploy
 
-- **Item 1** (login/repeated registration) — root cause is believed to
-  be the Azure Files volume mount at `/app/data` not being durable
-  across restarts/redeploys/scale events. **This deploy does NOT fix
-  it.** The only change (`auth-store.js`'s log warning) makes a future
-  recurrence visible in the log stream — it does not stop it. Needs
-  someone with Azure access to run:
-  `az containerapp show --name shift-board --resource-group shift-board-rg -o yaml | grep -A 20 "volumes:\|volumeMounts:"`
-  to confirm whether the volume is actually mounted right now.
 - **Item 6** (data changing after refresh) — still waiting on the
   client to confirm what category the three employees in question were
   under before the refresh (or whether they were missing from the board

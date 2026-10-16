@@ -1,44 +1,55 @@
 # Shift Board
 
 A Docker-based attendance dashboard pulling live from Sprout HR, with
-System ID + password login restricted to a dev-curated admin allowlist.
+System ID + password login against admin credentials defined by indexed
+environment variables.
 
 ## Authentication
 
-This app used to have **no login of any kind** — anyone with the URL
-could see attendance data. That's no longer the case. Here's how access
-control actually works now:
+Access control works like this:
 
-**Who can register:** only System IDs listed in the `ADMIN_ALLOWLIST`
-environment variable (comma-separated, e.g.
-`ADMIN_ALLOWLIST=2414,1936,1050`), set at deployment time by whoever's
-running the container. This is the actual gate — being a real Sprout
-employee alone isn't enough to register.
+**Credentials come from environment variables — there is no signup.**
+Each admin is a numbered pair of variables, created and managed by
+whoever operates the deployment (not by the app, and not by the people
+logging in):
 
-**How registration works:** someone on the allowlist visits the
-dashboard, clicks "Register," enters their System ID and a password of
-their choosing (minimum 8 characters). The server then double-checks
-that System ID against Sprout's *current* employee list — so someone
-can't register under a System ID that isn't a real, active employee,
-even if it ended up on the allowlist by mistake. Passwords are hashed
-with bcrypt before being stored; the plain password is never saved
-anywhere. Registering also logs you in immediately.
+```
+ADMIN_1_ID=<system id>
+ADMIN_1_PASSWORD=<that admin's password>
+ADMIN_2_ID=<system id>
+ADMIN_2_PASSWORD=<password>
+```
 
-**How login works after that:** System ID + the password chosen at
-registration. A signed session cookie (12-hour expiry) is issued —
-signed with `SESSION_SECRET` (see below), not stored server-side beyond
-the account record itself.
+Add as many pairs as there are admins. Numbering doesn't need to be
+contiguous (`ADMIN_1`, `ADMIN_3` is fine). A pair is skipped, with a
+startup warning, if only one of the two is set, or if the System ID
+contains a `.` (that would break the session-token format). A completely
+empty pair is treated as an unused slot and ignored silently. This
+replaces the old `ADMIN_ALLOWLIST` variable — the valid System IDs are
+simply the IDs present across the pairs.
 
-**Forgotten password:** there's no email-based reset — with only a small
-admin list, that would be real infrastructure (an email account/service,
-reset tokens, etc.) for a rare event. Instead, any *other* currently
-logged-in admin can go to **"Reset an admin account"** in the toolbar,
-enter the forgetful person's System ID, and clear their account entirely
-— they then just register again from scratch with a new password. The
-security model here is simply "already logged in as *some* admin," which
-is a reasonable bar with only a handful of people on the list; it stops
-being reasonable if this list grows large, at which point a real
-email-based reset is worth revisiting.
+**How login works:** System ID + password. The server compares the
+supplied password to the configured one using a constant-time comparison
+(both sides HMAC'd, then `crypto.timingSafeEqual`). A signed session
+cookie (12-hour expiry) is issued, signed with `SESSION_SECRET`.
+
+**Why this replaced registration:** the previous model had admins
+register themselves, with accounts stored in `data/admin-accounts.json`.
+On Azure Container Apps that file lived on container-local storage and
+was lost on every restart, redeploy, or scale-to-zero — so admins kept
+being asked to register again. Environment variables are part of the
+Container App's configuration and survive all of those. `data/admin-accounts.json`
+is **no longer created or read**; accounts come from the environment
+every time the app starts.
+
+**Forgotten password / changing a password:** there is nothing to reset
+in the app. The operator changes the `ADMIN_<n>_PASSWORD` value and
+restarts (a new revision, on Container Apps).
+
+**Revoking an admin:** remove their `ADMIN_<n>_ID` / `ADMIN_<n>_PASSWORD`
+pair and restart. Every protected request re-checks that the session's
+System ID is still configured, so this ends their active session on the
+very next request — not after the 12-hour expiry.
 
 **Auto-logout after 30 minutes idle:** tracked client-side (mouse,
 keyboard, scroll, or touch activity all reset the countdown) — walking
@@ -46,22 +57,32 @@ away from the dashboard logs you out automatically rather than leaving
 it open indefinitely. This is separate from, and shorter than, the
 12-hour session expiry above; either one can end a session first.
 
-**Required environment variables for this to work at all:**
-- `ADMIN_ALLOWLIST` — comma-separated System IDs allowed to register.
-  If unset, *nobody* can register (existing accounts can still log in).
+**Required environment variables:**
+- `ADMIN_<n>_ID` / `ADMIN_<n>_PASSWORD` — at least one pair, or nobody
+  can log in. The app starts either way and logs how many credentials it
+  loaded (a count only — never the passwords).
 - `SESSION_SECRET` — a long random string used to sign session cookies.
   If unset, a random one is generated per process start, which means
   **everyone gets logged out on every restart** until this is set
   explicitly. Set it to something fixed in real deployments.
 
-**Where accounts are stored:** `data/admin-accounts.json`, alongside the
-saved Sprout credentials (see `config-store.js` below) — same file, same
-Docker-volume requirement to survive a container restart.
+**The tradeoff accepted here:** passwords are plaintext in the
+environment (no hashing). Anyone who can read the environment — or any
+leak of it into logs or crash dumps — sees real, reusable passwords.
+That is acceptable only because access to the environment is itself
+controlled. Keep the values in the hosting platform's secret store (on
+Azure Container Apps: Container App secrets referenced with `secretref:`,
+not plain env values), never in source control or logs, with access
+limited to the people who need it.
 
 **What's still open, deliberately:** `/health` (for uptime checks) and
 the dashboard's page shell itself (the login form has to be reachable
 before anyone can log in) — but no actual attendance data, settings, or
 employee information is served without a valid session.
+
+*(Older sections of this README that mention registering, resetting an
+admin account, `ADMIN_ALLOWLIST`, or bcrypt describe the previous model
+and are kept as history.)*
 
 ## Why there's still a backend at all
 
@@ -749,14 +770,20 @@ no truncation at all.
 
 ### Login is required
 
-There's a full System ID + password login system — see the
-"Authentication" section above. The dashboard, its API, and the settings
+There's a full System ID + password login system, with credentials from
+environment variables — see the "Authentication" section above. The dashboard, its API, and the settings
 endpoint are all behind it; nothing here is reachable without a valid
 session.
 
-### Persistence — this needs a Docker volume
+### Persistence — only needed for settings saved through the dashboard
 
-Saved settings live in `data/sprout-config.json` inside the container.
+Admin logins no longer touch disk (they come from environment
+variables), so they don't need a volume. The one thing that still does is
+Sprout credentials saved through the dashboard's Credentials panel — and
+only if they are *not* set via the four `SPROUT_*` environment variables
+(setting all four locks the panel and skips the file entirely).
+
+Those saved settings live in `data/sprout-config.json` inside the container.
 Docker containers are ephemeral by default — **without the volume mount
 already set up in `docker-compose.yml`, saved settings are lost every
 time the container restarts or gets redeployed.** If you're deploying
@@ -766,9 +793,12 @@ there too, or settings won't survive a redeploy.
 
 ## Running it locally
 
-1. Copy `.env.example` to `.env` — filling in Sprout credentials here is
-   now optional (only used for the very first run before you've saved
-   anything through the settings panel)
+1. Copy `.env.example` to `.env` — set at least one `ADMIN_1_ID` /
+   `ADMIN_1_PASSWORD` pair and a `SESSION_SECRET` so you can log in.
+   Filling in Sprout credentials is optional (only used for the very
+   first run before you've saved anything through the settings panel).
+   If a password contains a `$`, write it as `$$` in `.env` (Docker
+   Compose treats a single `$` as variable interpolation).
 2. `docker compose up --build`
 3. Visit `http://localhost:3000` — paste `http://localhost:3000/api/shift-board`
    into the setup box, and use "Sprout settings" to enter credentials if
@@ -784,9 +814,10 @@ shift-board-no-auth/
 ├── AZURE_DEPLOYMENT.md   (simplified — no Keycloak/Postgres needed)
 ├── package.json
 ├── public/
-│   └── index.html         (dashboard — no login, has Sprout settings panel)
+│   └── index.html         (dashboard + login gate, has Sprout settings panel)
 └── src/
-    ├── server.js           (Express app — everything here is OPEN, no auth)
+    ├── server.js           (Express app — everything but /health and the page shell is behind login)
+    ├── auth-store.js       (env-var admin credentials, session tokens)
     ├── config-store.js     (persists credentials submitted via settings panel)
     └── sprout.js            (Sprout HR integration, unchanged)
 ```

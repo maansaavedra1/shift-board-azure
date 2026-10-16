@@ -1,7 +1,7 @@
 {
   "name": "shift-board-no-auth",
   "version": "1.0.0",
-  "description": "Shift Board — containerized backend. Now includes System ID + password login for a dev-curated admin allowlist (see README's Authentication section) — the 'no-auth' in the name is historical at this point, kept so existing deployment docs/scripts referencing it don't break.",
+  "description": "Shift Board — containerized backend. System ID + password login against admin credentials defined by indexed environment variables (ADMIN_<n>_ID / ADMIN_<n>_PASSWORD) — see README's Authentication section. The 'no-auth' in the name is historical, kept so existing deployment docs/scripts referencing it don't break.",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
@@ -9,7 +9,6 @@
   },
   "dependencies": {
     "express": "^4.19.2",
-    "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6"
   }
 }
