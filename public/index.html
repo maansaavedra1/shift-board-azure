@@ -705,6 +705,10 @@
   var lastMultiDayReports = null; // set when in multi-day mode, mirrors lastReport for Today mode
 
   function exportToExcel() {
+    if (isPreliminaryNow) {
+      alert('These counts are still preliminary — the first sync has not finished. Export will be available once loading completes.');
+      return;
+    }
     if (lastMultiDayReports) {
       exportMultiDayToExcel(lastMultiDayReports);
       return;
@@ -969,6 +973,16 @@
   var autoRefreshTimer = null;
   var autoRefreshDeadline = null;
 
+  // Export to Excel is blocked while the numbers are still preliminary, so a
+  // spreadsheet of not-yet-final counts can't be saved and shared by accident.
+  var isLoadingNow = false;
+  var isPreliminaryNow = false;
+  function updateExportButton() {
+    var btn = document.getElementById('exportBtn');
+    btn.disabled = isLoadingNow || isPreliminaryNow;
+    btn.title = isPreliminaryNow ? 'Available once the first sync finishes — these counts are still preliminary.' : '';
+  }
+
   function isPreliminary(cache) {
     return !!cache && !cache.lastRefreshedAt;
   }
@@ -991,6 +1005,8 @@
   function renderPreliminaryState(cache) {
     var block = document.getElementById('summaryBlock');
     var note = document.getElementById('preliminaryNote');
+    isPreliminaryNow = isPreliminary(cache);
+    updateExportButton();
     if (!isPreliminary(cache)) {
       block.classList.remove('preliminary');
       note.classList.remove('visible');
@@ -1004,7 +1020,8 @@
     }
     var gaveUp = autoRefreshDeadline === null && !autoRefreshTimer;
     note.innerHTML = '<strong>Preliminary</strong>Leave and schedule changes are still loading' + progress + '. '
-      + (gaveUp ? 'Press Refresh to check again.' : 'These counts will update on their own.');
+      + (gaveUp ? 'Press Refresh to check again.' : 'No need to refresh — these counts update on their own, and refreshing will not make it faster.')
+      + ' Export to Excel unlocks when loading finishes.';
     note.classList.add('visible');
   }
 
@@ -1036,7 +1053,7 @@
     }
   }
 
-  function scheduleAdjustmentCacheMessage(cache) {
+  function scheduleAdjustmentCacheMessage(cache, autoUpdates) {
     if (!cache) return null;
     if (cache.lastRefreshedAt) {
       // A cache that completed once used to be treated as permanently
@@ -1058,7 +1075,11 @@
     if (cache.lastError) {
       return 'Schedule adjustments could not load yet (' + cache.lastError + ') — will keep retrying in the background.';
     }
-    return 'Schedule adjustments are still loading for the first time — leave and one-off schedule changes may not show yet, so the counts below are preliminary and will update on their own. This can take a few minutes for a large employee list.';
+    // Only the single-day (Today) view re-checks by itself — the multi-day
+    // views are heavier to load, so there the person is asked to refresh.
+    return autoUpdates
+      ? 'Schedule adjustments are still loading for the first time — leave and one-off schedule changes may not show yet, so the counts below are preliminary. No need to refresh: this page updates on its own, and refreshing will not make it load faster. This can take a few minutes for a large employee list.'
+      : 'Schedule adjustments are still loading for the first time — leave and one-off schedule changes may not show yet, so the counts below are preliminary. Please press Refresh in a few minutes, once it has finished loading. Export to Excel unlocks then.';
   }
 
   // Small, persistent (not just cold-start) note next to "Last updated" —
@@ -1295,7 +1316,12 @@
         var shiftStartDisp = formatLogTime(e.scheduledShiftStart);
         var shiftEndDisp = formatLogTime(e.scheduledShiftEnd);
         if (shiftStartDisp && shiftEndDisp) {
-          reason += (reason ? ' · ' : '') + 'Shift: ' + escapeHtml(shiftStartDisp) + ' – ' + escapeHtml(shiftEndDisp);
+          if (e.shiftNotStarted) {
+            // Not late for anything yet — say when the shift actually starts.
+            reason = 'Shift starts ' + escapeHtml(shiftStartDisp) + ' · ends ' + escapeHtml(shiftEndDisp);
+          } else {
+            reason += (reason ? ' · ' : '') + 'Shift: ' + escapeHtml(shiftStartDisp) + ' – ' + escapeHtml(shiftEndDisp);
+          }
         }
       }
       result = timesHtml ? (reason ? (reason + ' — ' + timesHtml) : timesHtml) : (reason || '—');
@@ -1356,7 +1382,11 @@
         var shiftStartDisp2 = formatLogTime(e.scheduledShiftStart);
         var shiftEndDisp2 = formatLogTime(e.scheduledShiftEnd);
         if (shiftStartDisp2 && shiftEndDisp2) {
-          reason += (reason ? ' · ' : '') + 'Shift: ' + shiftStartDisp2 + ' – ' + shiftEndDisp2;
+          if (e.shiftNotStarted) {
+            reason = 'Shift starts ' + shiftStartDisp2 + ' · ends ' + shiftEndDisp2;
+          } else {
+            reason += (reason ? ' · ' : '') + 'Shift: ' + shiftStartDisp2 + ' – ' + shiftEndDisp2;
+          }
         }
       }
       result = times ? (reason ? (reason + ' — ' + times) : times) : (reason || '—');
@@ -1639,7 +1669,8 @@
 
   function setLoadingState(isLoading) {
     document.getElementById('refreshBtn').disabled = isLoading;
-    document.getElementById('exportBtn').disabled = isLoading;
+    isLoadingNow = isLoading;
+    updateExportButton();
     document.querySelectorAll('.range-btn').forEach(function (btn) { btn.disabled = isLoading; });
     document.getElementById('groupsContainer').classList.toggle('is-loading', isLoading);
   }
@@ -1724,8 +1755,10 @@
         renderMultiDayReports(data.reports);
 
         var adjCache = data.reports.length ? data.reports[0].report.scheduleAdjustmentCache : null;
+        isPreliminaryNow = isPreliminary(adjCache);
+        updateExportButton();
         renderScheduleAdjustmentNote(adjCache);
-        var adjMessage = scheduleAdjustmentCacheMessage(adjCache);
+        var adjMessage = scheduleAdjustmentCacheMessage(adjCache, false);
         if (adjMessage) showInfo(adjMessage);
       } else {
         summaryBlock.style.display = '';
@@ -1743,7 +1776,7 @@
         }
         renderPreliminaryState(dayCache);
         renderScheduleAdjustmentNote(data.report.scheduleAdjustmentCache);
-        var adjMsg = scheduleAdjustmentCacheMessage(data.report.scheduleAdjustmentCache);
+        var adjMsg = scheduleAdjustmentCacheMessage(data.report.scheduleAdjustmentCache, true);
         if (adjMsg) {
           showInfo(adjMsg);
         } else {

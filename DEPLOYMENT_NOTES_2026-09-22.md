@@ -204,6 +204,10 @@ total stays 356. Once loaded, the On Leave list matched Sprout's exactly.
 3. `public/index.html` — while preliminary, the board **re-checks on its own**
    every 15 seconds (single-day view only), stops as soon as the sync finishes,
    and gives up after 6 minutes (then asks the person to press Refresh).
+   The note tells people there is no need to refresh (refreshing does not make
+   it faster and adds calls). The multi-day views do not re-check by
+   themselves, so their banner asks the person to press Refresh in a few minutes
+   instead of promising automatic updates.
    Sections the person has expanded and their shift filter are kept across the
    automatic re-checks. **Cost:** each re-check is a normal Today load
    (~18 Sprout calls); typically ~8-12 re-checks per cold start (roughly
@@ -224,6 +228,34 @@ only changes who is checked first.
 **Not changed:** the ~3 minute total sync time, and the sweep still starts on
 every restart. Setting minimum replicas to 1 is held until the API-call-limit
 question is answered.
+
+## Late list wording, Export lock, and late tolerance
+
+1. **"Late (Shift Ongoing)" no longer implies a shift is underway when it has
+   not started.** Someone on a 9PM–9AM shift seen at 5PM now reads
+   "Shift starts 9:00PM · ends 9:00AM" (on screen and in the Excel export)
+   instead of "No log-in yet, shift still ongoing". They stay in the same
+   category, so no counts change; people whose shift has started and who have
+   not clocked in still read "No log-in yet, shift still ongoing · Shift: …".
+   (`shiftNotStarted` flag in `src/sprout.js`, wording in `public/index.html`.)
+   A separate category for these people remains an option if wording is not
+   enough — it would change the Late count, so it was not done.
+2. **Export to Excel is disabled while the numbers are preliminary** (Today and
+   multi-day views), with a tooltip and a line in the PRELIMINARY note
+   explaining it unlocks when loading finishes. A safety check inside the export
+   itself blocks it too. In the multi-day views the button re-enables after the
+   person presses Refresh once loading has finished (those views do not
+   re-check by themselves).
+3. **Late tolerance: no change.** Firstmac has no grace period, so the board
+   flagging any minute of lateness matches their policy. One difference is
+   still unexplained: in the 7 Oct recordings the board listed Marie Suzanne
+   Salazar as 11 minutes late while Sprout's Daily Attendance dashboard showed
+   only one late employee. Worth checking her record in Sprout.
+
+**Verified:** classification against the real code with shifts set relative to
+now (not started / underway / ended); the page in a simulated browser; the
+Excel wording by running the real function lifted from the page. Each guard
+was mutation-checked.
 
 ## Not covered by this deploy
 

@@ -748,10 +748,17 @@ function classifyEmployeeForDay(emp, dayContext) {
     // feedback — someone reviewing "Late (Shift Ongoing)" has no way to
     // tell how late is late, or when a graveyard shift is actually due
     // to end, without knowing the employee's own scheduled hours.
+    // Someone whose shift has not STARTED yet is not late for anything —
+    // e.g. a 9PM-9AM employee on the 5PM board. They stay in this category
+    // (same counts as before), but are flagged so the Detail column can say
+    // "Shift starts 9:00PM" instead of implying their shift is underway.
+    const shiftNotStarted = !!(shiftStartBoundary && new Date() < shiftStartBoundary);
     return {
       status: 'late',
       entry: {
-        name, ...contactInfo, loginTime, logoutTime, reason: 'no log-in yet, shift still ongoing',
+        name, ...contactInfo, loginTime, logoutTime,
+        reason: shiftNotStarted ? 'shift has not started yet' : 'no log-in yet, shift still ongoing',
+        shiftNotStarted,
         scheduledShiftStart: shiftStartBoundary ? shiftStartBoundary.toISOString() : null,
         scheduledShiftEnd: shiftEndBoundary ? shiftEndBoundary.toISOString() : null
       }
