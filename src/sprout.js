@@ -152,7 +152,10 @@ async function sproutHeaders() {
   };
 }
 
-async function getEmployees(preloadedFirstResponse) {
+// Downloads the WHOLE roster (every page), including resigned and terminated
+// employees. getEmployees() below filters those out for the dashboard; the
+// biometric-ID check needs them, because a shared ID can hide behind a former employee.
+async function fetchAllEmployeesUnfiltered(preloadedFirstResponse) {
   let allEmployees = [];
   let pageNumber = 1;
   const pageSize = 100;
@@ -173,6 +176,11 @@ async function getEmployees(preloadedFirstResponse) {
     pageNumber++;
     if (pageNumber > 50) break;
   }
+  return allEmployees;
+}
+
+async function getEmployees(preloadedFirstResponse) {
+  const allEmployees = await fetchAllEmployeesUnfiltered(preloadedFirstResponse);
 
   // Excludes resigned and terminated employees — confirmed against real
   // production data (via a one-time diagnostic check of the actual
@@ -1172,6 +1180,78 @@ async function findEmployeeByName(nameQuery) {
 // One-time diagnostic: fetches one employee's raw Schedules data live,
 // bypassing the cache entirely, so it can be compared directly against
 // what is (or isn't) actually cached for them right now.
+// Read-only roster health check for biometric IDs. Looks at EVERY employee
+// record (including resigned/terminated) and reports:
+//   - biometric IDs shared by more than one employee record,
+//   - employees with no biometric ID (missing, blank or 0),
+//   - optionally, everyone holding one specific biometric ID.
+// The dashboard matches punches to people by biometric ID, so a shared ID
+// would credit two people with each other's punches. Only the fields needed
+// to identify a record are returned (no birth dates, schedules, etc.), and
+// names are returned only for duplicates and for the ID being looked up.
+const BIO_EXCLUDED_STATUSES = ['resigned', 'terminated'];
+
+function normalizeBioId(value) {
+  if (value === undefined || value === null) return null;
+  const s = String(value).trim();
+  if (s === '') return null;
+  if (/^\d+$/.test(s)) { const n = BigInt(s); return n === 0n ? null : String(n); } // "0" = none; "00500" == 500
+  return s;
+}
+
+async function checkBiometricIds(targetBioId) {
+  const all = await fetchAllEmployeesUnfiltered();
+  const summarize = (emp) => {
+    const basic = emp.basicInformation || {};
+    const work = emp.workInformation || {};
+    const status = work.employmentStatus || '';
+    return {
+      systemId: basic.systemId,
+      employeeId: basic.employeeId,
+      name: `${basic.firstName || ''} ${basic.lastName || ''}`.trim(),
+      employmentStatus: status,
+      active: !BIO_EXCLUDED_STATUSES.includes(status.toLowerCase()),
+      biometricId: work.biometricId
+    };
+  };
+
+  const groups = new Map();
+  const missing = [];
+  all.forEach((emp) => {
+    const sum = summarize(emp);
+    const key = normalizeBioId(sum.biometricId);
+    if (key === null) { missing.push({ systemId: sum.systemId, employeeId: sum.employeeId, active: sum.active }); return; }
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(sum);
+  });
+
+  const duplicates = [];
+  groups.forEach((people, key) => {
+    if (people.length > 1) {
+      const activeCount = people.filter((p) => p.active).length;
+      duplicates.push({ biometricId: key, count: people.length, activeCount, employees: people });
+    }
+  });
+  duplicates.sort((a, b) => b.activeCount - a.activeCount || b.count - a.count);
+
+  const result = {
+    totalRecords: all.length,
+    activeRecords: all.filter((e) => summarize(e).active).length,
+    duplicateIdCount: duplicates.length,
+    duplicateIdsAmongActive: duplicates.filter((d) => d.activeCount > 1).length,
+    duplicates,
+    missingBiometricCount: missing.length,
+    missingBiometricActiveCount: missing.filter((m) => m.active).length,
+    missingBiometric: missing
+  };
+  if (targetBioId !== undefined && targetBioId !== null && String(targetBioId).trim() !== '') {
+    const key = normalizeBioId(targetBioId);
+    const matches = key === null ? [] : (groups.get(key) || []);
+    result.target = { biometricId: String(targetBioId).trim(), matchCount: matches.length, matches };
+  }
+  return result;
+}
+
 async function getRawScheduleForEmployee(employeeId, windowDaysPast, windowDaysFuture) {
   const now = new Date();
   const rangeStart = new Date(now.getTime() - windowDaysPast * 24 * 60 * 60 * 1000);
@@ -1567,4 +1647,4 @@ async function getLeaveApprovalDate(employeeId, dayKey) {
   };
 }
 
-module.exports = { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, findEmployeeByName, getRawScheduleForEmployee, probeLeaveEndpoints, getLeaveApprovalDate, getRawAttendanceLogsForEmployee };
+module.exports = { checkBiometricIds, computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, getEmployees, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, findEmployeeByName, getRawScheduleForEmployee, probeLeaveEndpoints, getLeaveApprovalDate, getRawAttendanceLogsForEmployee };

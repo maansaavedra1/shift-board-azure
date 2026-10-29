@@ -1,7 +1,7 @@
 const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
-const { computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, probeLeaveEndpoints, getLeaveApprovalDate, findEmployeeByName, getRawScheduleForEmployee, getRawAttendanceLogsForEmployee } = require('./sprout');
+const { checkBiometricIds, computeTodayReport, computeReportsForDateRange, computeReportsForCustomRange, resetTokenCache, refreshScheduleAdjustmentsCache, getScheduleAdjustmentCacheStatus, MAX_CUSTOM_RANGE_DAYS, probeLeaveEndpoints, getLeaveApprovalDate, findEmployeeByName, getRawScheduleForEmployee, getRawAttendanceLogsForEmployee } = require('./sprout');
 const configStore = require('./config-store');
 const authStore = require('./auth-store');
 
@@ -220,6 +220,19 @@ app.post('/api/settings', (req, res) => {
 // One-time diagnostic: finds an employee's raw record by name — for
 // looking up a System ID quickly when investigating someone's
 // classification. Query with ?name=<substring>, case-insensitive.
+// Read-only roster check: duplicate / missing biometric IDs (see checkBiometricIds
+// in sprout.js). Behind login like every other /api route. Optional ?id=<biometric id>
+// also lists everyone holding that one ID.
+app.get('/api/debug/biometric-check', async (req, res) => {
+  try {
+    const result = await checkBiometricIds(req.query.id);
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('Biometric check failed:', err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get('/api/debug/employee-lookup', async (req, res) => {
   try {
     const nameQuery = req.query.name || '';

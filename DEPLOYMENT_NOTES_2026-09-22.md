@@ -262,6 +262,26 @@ now (not started / underway / ended); the page in a simulated browser; the
 Excel wording by running the real function lifted from the page. Each guard
 was mutation-checked.
 
+## Biometric ID check (read-only diagnostic)
+
+New admin route `GET /api/debug/biometric-check[?id=<biometric id>]` (behind login,
+like every other /api route). It downloads the whole roster, including resigned and
+terminated employees, and reports biometric IDs shared by more than one record and
+employees with no biometric ID (missing, blank or 0); with `?id=` it also lists
+everyone holding that one ID. Only the fields needed to identify a record are
+returned (no birth dates or schedules); names appear only for duplicates and for the
+ID being looked up. It uses the same `Employees` GET already in the endpoint list,
+so there is no new Sprout endpoint and nothing is written anywhere.
+
+Why: the dashboard matches punches to people by biometric ID, so an ID shared by two
+active people would credit each with the other's punches.
+
+**Verified** against a mocked roster (two active people sharing an ID, an active person
+sharing with a resigned one, IDs stored as text and with leading zeros, blank/0/null
+IDs, a roster spanning several pages); the route returns 401 without a login; the
+dashboard's active-only roster is unchanged. **Not verified** against the real Sprout
+roster. This route can be removed once the check has been done.
+
 ## Not covered by this deploy
 
 - **Item 6** (data changing after refresh) — still waiting on the
